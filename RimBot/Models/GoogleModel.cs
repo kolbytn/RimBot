@@ -51,13 +51,38 @@ namespace RimBot.Models
                 foreach (var msg in nonSystemMessages)
                 {
                     var role = msg.Role == "assistant" ? "model" : msg.Role;
+                    var partsArray = new JArray();
+
+                    if (msg.HasImages)
+                    {
+                        foreach (var part in msg.ContentParts)
+                        {
+                            if (part.Type == "text")
+                            {
+                                partsArray.Add(new JObject { ["text"] = part.Text });
+                            }
+                            else if (part.Type == "image_url")
+                            {
+                                partsArray.Add(new JObject
+                                {
+                                    ["inline_data"] = new JObject
+                                    {
+                                        ["mime_type"] = part.MediaType,
+                                        ["data"] = part.Base64Data
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        partsArray.Add(new JObject { ["text"] = msg.Content });
+                    }
+
                     contentsArray.Add(new JObject
                     {
                         ["role"] = role,
-                        ["parts"] = new JArray
-                        {
-                            new JObject { ["text"] = msg.Content }
-                        }
+                        ["parts"] = partsArray
                     });
                 }
                 requestBody["contents"] = contentsArray;

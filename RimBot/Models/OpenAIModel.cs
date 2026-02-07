@@ -31,11 +31,41 @@ namespace RimBot.Models
                 var messagesArray = new JArray();
                 foreach (var msg in messages)
                 {
-                    messagesArray.Add(new JObject
+                    var msgObj = new JObject { ["role"] = msg.Role };
+
+                    if (msg.HasImages)
                     {
-                        ["role"] = msg.Role,
-                        ["content"] = msg.Content
-                    });
+                        var contentArray = new JArray();
+                        foreach (var part in msg.ContentParts)
+                        {
+                            if (part.Type == "text")
+                            {
+                                contentArray.Add(new JObject
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = part.Text
+                                });
+                            }
+                            else if (part.Type == "image_url")
+                            {
+                                contentArray.Add(new JObject
+                                {
+                                    ["type"] = "image_url",
+                                    ["image_url"] = new JObject
+                                    {
+                                        ["url"] = $"data:{part.MediaType};base64,{part.Base64Data}"
+                                    }
+                                });
+                            }
+                        }
+                        msgObj["content"] = contentArray;
+                    }
+                    else
+                    {
+                        msgObj["content"] = msg.Content;
+                    }
+
+                    messagesArray.Add(msgObj);
                 }
 
                 var requestBody = new JObject
