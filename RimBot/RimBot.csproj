@@ -86,6 +86,8 @@
     <Compile Include="Models\OpenAIModel.cs" />
     <Compile Include="Models\GoogleModel.cs" />
     <Compile Include="Models\LLMModelFactory.cs" />
+    <Compile Include="HistoryEntry.cs" />
+    <Compile Include="ITab_RimBotHistory.cs" />
     <Compile Include="Brain.cs" />
     <Compile Include="BrainManager.cs" />
     <Compile Include="ScreenshotCapture.cs" />

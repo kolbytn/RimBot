@@ -18,6 +18,13 @@ namespace RimBot
         private static int nextAssignmentIndex;
         private static bool extraColonistsSpawned;
 
+        public static Brain GetBrain(int pawnId)
+        {
+            Brain brain;
+            brains.TryGetValue(pawnId, out brain);
+            return brain;
+        }
+
         public static void EnqueueMainThread(Action action)
         {
             mainThreadQueue.Enqueue(action);

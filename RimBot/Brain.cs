@@ -22,8 +22,11 @@ namespace RimBot
         public MapSelectionMode PreferredMode { get; }
 
         private State state = State.Idle;
+        private readonly List<HistoryEntry> history = new List<HistoryEntry>();
+        private const int MaxHistoryEntries = 50;
 
         public bool IsIdle => state == State.Idle;
+        public IReadOnlyList<HistoryEntry> History => history;
 
         public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, MapSelectionMode preferredMode)
         {
@@ -50,18 +53,20 @@ namespace RimBot
             var apiKey = ApiKey;
             var model = Model;
             var label = PawnLabel;
+            var sysPrompt = "You are the inner mind of a RimWorld colonist named " + label +
+                ". Describe what you see briefly from this colonist's perspective.";
+            var userQuery = "What do you see?";
             var messages = new List<ChatMessage>
             {
-                new ChatMessage("system",
-                    "You are the inner mind of a RimWorld colonist named " + label +
-                    ". Describe what you see briefly from this colonist's perspective."),
+                new ChatMessage("system", sysPrompt),
                 new ChatMessage("user", new List<ContentPart>
                 {
-                    ContentPart.FromText("What do you see?"),
+                    ContentPart.FromText(userQuery),
                     ContentPart.FromImage(base64, "image/png")
                 })
             };
 
+            var capturedBase64 = base64;
             Task.Run(async () =>
             {
                 try
@@ -72,10 +77,12 @@ namespace RimBot
                         if (response.Success)
                         {
                             Log.Message("[RimBot] [" + label + "] Vision: " + response.Content);
+                            RecordHistory("Vision", sysPrompt, userQuery, capturedBase64, response.Content, true);
                         }
                         else
                         {
                             Log.Error("[RimBot] [" + label + "] Vision error: " + response.ErrorMessage);
+                            RecordHistory("Vision", sysPrompt, userQuery, capturedBase64, response.ErrorMessage, false);
                         }
                     });
                 }
@@ -84,6 +91,7 @@ namespace RimBot
                     BrainManager.EnqueueMainThread(() =>
                     {
                         Log.Error("[RimBot] [" + label + "] Vision request failed: " + ex.Message);
+                        RecordHistory("Vision", sysPrompt, userQuery, capturedBase64, ex.Message, false);
                     });
                 }
                 finally
@@ -109,6 +117,9 @@ namespace RimBot
             var model = Model;
             var label = PawnLabel;
             var obsPos = observerPos;
+            var capturedBase64 = base64;
+            var capturedSysPrompt = systemPrompt;
+            var capturedUserQuery = userQuery;
 
             var messages = new List<ChatMessage>
             {
@@ -149,11 +160,13 @@ namespace RimBot
                                 Log.Warning("[RimBot] [ARCHITECT] [" + label + "] Raw response: " + response.Content);
                             }
 
+                            RecordHistory("Architect", capturedSysPrompt, capturedUserQuery, capturedBase64, response.Content, true);
                             onResult(label, worldCoords);
                         }
                         else
                         {
                             Log.Error("[RimBot] [ARCHITECT] [" + label + "] LLM error: " + response.ErrorMessage);
+                            RecordHistory("Architect", capturedSysPrompt, capturedUserQuery, capturedBase64, response.ErrorMessage, false);
                         }
                     });
                 }
@@ -162,6 +175,7 @@ namespace RimBot
                     BrainManager.EnqueueMainThread(() =>
                     {
                         Log.Error("[RimBot] [ARCHITECT] [" + label + "] Request failed: " + ex.Message);
+                        RecordHistory("Architect", capturedSysPrompt, capturedUserQuery, capturedBase64, ex.Message, false);
                     });
                 }
                 finally
@@ -228,6 +242,10 @@ namespace RimBot
             var selMode = mode;
             var tag = "SELECT:" + modeTag;
             var provider = Provider;
+            var capturedBase64 = base64;
+            var capturedSysPrompt = systemPrompt;
+            var capturedQuery = query;
+            var selModeLabel = mode == MapSelectionMode.Mask ? "Selection (mask)" : "Selection (coords)";
 
             Task.Run(async () =>
             {
@@ -241,6 +259,12 @@ namespace RimBot
 
                     BrainManager.EnqueueMainThread(() =>
                     {
+                        var responseText = response.Success
+                            ? (response.Content ?? response.ImageBase64 ?? "")
+                            : response.ErrorMessage;
+                        RecordHistory(selModeLabel, capturedSysPrompt, capturedQuery, capturedBase64,
+                            responseText, response.Success);
+
                         if (selMode == MapSelectionMode.Mask)
                             HandleMaskResponse(tag, label, expX, expZ, response, provider, selMode, objType);
                         else
@@ -252,6 +276,7 @@ namespace RimBot
                     BrainManager.EnqueueMainThread(() =>
                     {
                         Log.Error("[RimBot] [" + tag + "] [" + label + "] Request failed: " + ex.Message);
+                        RecordHistory(selModeLabel, capturedSysPrompt, capturedQuery, capturedBase64, ex.Message, false);
                     });
                 }
                 finally
@@ -363,6 +388,31 @@ namespace RimBot
                 + ", " + reported.Count + " hot cells");
 
             LogMatchResults(tag, label, expX, expZ, reported, provider, mode, objectType);
+        }
+
+        private void RecordHistory(string mode, string systemPrompt, string userQuery,
+            string base64, string responseText, bool success)
+        {
+            var entry = new HistoryEntry
+            {
+                GameTick = Find.TickManager != null ? Find.TickManager.TicksGame : 0,
+                Mode = mode,
+                SystemPrompt = systemPrompt,
+                UserQuery = userQuery,
+                ResponseText = responseText,
+                Success = success,
+                Provider = Provider,
+                ModelName = Model,
+                ScreenshotBase64 = base64
+            };
+
+            history.Insert(0, entry);
+
+            while (history.Count > MaxHistoryEntries)
+            {
+                history[history.Count - 1].DisposeTexture();
+                history.RemoveAt(history.Count - 1);
+            }
         }
 
         private static void LogMatchResults(string tag, string label,
