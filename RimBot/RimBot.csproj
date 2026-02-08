@@ -90,6 +90,7 @@
     <Compile Include="BrainManager.cs" />
     <Compile Include="ScreenshotCapture.cs" />
     <Compile Include="SelectionTest.cs" />
+    <Compile Include="ArchitectMode.cs" />
     <Compile Include="SelectionTestWindow.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

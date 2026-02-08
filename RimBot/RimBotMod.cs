@@ -63,6 +63,11 @@ namespace RimBot
                 Find.WindowStack.Add(new SelectionTestWindow());
             }
 
+            if (listing.ButtonText(ArchitectMode.IsRunning ? "Stop Architect Mode" : "Start Architect Mode"))
+            {
+                ArchitectMode.Toggle();
+            }
+
             listing.End();
         }
     }

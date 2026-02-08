@@ -93,6 +93,84 @@ namespace RimBot
             });
         }
 
+        public void GenerateArchitectPlan(string base64, string systemPrompt, string userQuery,
+            IntVec3 observerPos, Action<string, List<IntVec3>> onResult)
+        {
+            if (base64 == null)
+                return;
+            if (state != State.Idle)
+                return;
+
+            state = State.WaitingForLLM;
+
+            var maxTokens = RimBotMod.Settings.maxTokens;
+            var llmModel = LLMModelFactory.GetModel(Provider);
+            var apiKey = ApiKey;
+            var model = Model;
+            var label = PawnLabel;
+            var obsPos = observerPos;
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage("system", systemPrompt),
+                new ChatMessage("user", new List<ContentPart>
+                {
+                    ContentPart.FromText(userQuery),
+                    ContentPart.FromImage(base64, "image/png")
+                })
+            };
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var response = await llmModel.SendChatRequest(messages, model, apiKey, maxTokens);
+                    BrainManager.EnqueueMainThread(() =>
+                    {
+                        if (response.Success)
+                        {
+                            var coordMatches = Regex.Matches(response.Content ?? "", @"\((-?\d+\.?\d*),\s*(-?\d+\.?\d*)\)");
+                            var worldCoords = new List<IntVec3>();
+                            foreach (Match m in coordMatches)
+                            {
+                                double rx = double.Parse(m.Groups[1].Value);
+                                double rz = double.Parse(m.Groups[2].Value);
+                                worldCoords.Add(new IntVec3(
+                                    obsPos.x + (int)Math.Round(rx),
+                                    0,
+                                    obsPos.z + (int)Math.Round(rz)));
+                            }
+
+                            Log.Message("[RimBot] [ARCHITECT] [" + label + "] LLM returned "
+                                + worldCoords.Count + " coordinates");
+
+                            if (worldCoords.Count == 0)
+                            {
+                                Log.Warning("[RimBot] [ARCHITECT] [" + label + "] Raw response: " + response.Content);
+                            }
+
+                            onResult(label, worldCoords);
+                        }
+                        else
+                        {
+                            Log.Error("[RimBot] [ARCHITECT] [" + label + "] LLM error: " + response.ErrorMessage);
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    BrainManager.EnqueueMainThread(() =>
+                    {
+                        Log.Error("[RimBot] [ARCHITECT] [" + label + "] Request failed: " + ex.Message);
+                    });
+                }
+                finally
+                {
+                    state = State.Idle;
+                }
+            });
+        }
+
         public void GenerateMapSelection(string base64, string query, MapSelectionMode mode, int[] expectedX, int[] expectedZ, string objectType = null)
         {
             if (base64 == null)

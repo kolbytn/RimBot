@@ -44,6 +44,7 @@ namespace RimBot
 
             EnsureFiveColonists();
             SelectionTest.CheckAutoStart();
+            ArchitectMode.CheckAutoStart();
             SyncBrains();
 
             if (captureInProgress)
@@ -115,6 +116,11 @@ namespace RimBot
                 {
                     Log.Message("[RimBot] Selection test cycle: capturing " + brainOrder.Count + " brains");
                     SelectionTest.ProcessCapture(brainOrder, pawnOrder, results);
+                }
+                else if (ArchitectMode.IsRunning)
+                {
+                    Log.Message("[RimBot] Architect mode cycle: " + brainOrder.Count + " brains");
+                    ArchitectMode.ProcessCapture(brainOrder, pawnOrder, results);
                 }
                 else
                 {
