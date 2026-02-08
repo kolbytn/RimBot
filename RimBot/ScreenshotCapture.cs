@@ -1,4 +1,7 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using HarmonyLib;
 using UnityEngine;
 using Verse;
 
@@ -6,116 +9,91 @@ namespace RimBot
 {
     public static class ScreenshotCapture
     {
-        private static bool captureRequested;
-        private static int captureSize;
-        private static Action<string> captureCallback;
-
-        static ScreenshotCapture()
+        public struct CaptureRequest
         {
-            Camera.onPostRender += OnPostRender;
+            public IntVec3 CenterCell;
+            public float CameraSize;
+            public int PixelSize;
         }
 
-        /// <summary>
-        /// Requests a capture of the current camera view. The callback fires
-        /// during the render phase of the same frame (from Camera.onPostRender),
-        /// with the base64-encoded PNG or null on failure.
-        /// </summary>
-        public static void RequestCurrentViewCapture(int size, Action<string> callback)
+        public static void StartBatchCapture(List<CaptureRequest> requests, Action<string[]> onComplete)
         {
-            captureRequested = true;
-            captureSize = size;
-            captureCallback = callback;
+            Find.CameraDriver.StartCoroutine(CaptureCoroutine(requests, onComplete));
         }
 
-        private static void OnPostRender(Camera cam)
+        private static IEnumerator CaptureCoroutine(List<CaptureRequest> requests, Action<string[]> onComplete)
         {
-            if (!captureRequested)
-                return;
-            if (cam != Find.Camera)
-                return;
+            var results = new string[requests.Count];
 
-            captureRequested = false;
-            var callback = captureCallback;
-            captureCallback = null;
-            var size = captureSize;
+            Camera camera = Find.Camera;
+            CameraDriver camDriver = Find.CameraDriver;
 
-            try
+            // Save camera state
+            Vector3 originalPos = camera.transform.position;
+            float originalOrthoSize = camera.orthographicSize;
+            float originalFarClip = camera.farClipPlane;
+            RenderTexture originalTarget = camera.targetTexture;
+
+            // Disable CameraDriver so it doesn't fight our camera changes
+            camDriver.enabled = false;
+
+            // Spoof the ViewRect to cover the entire map.
+            // This tricks RimWorld's MapDrawer into treating all sections as "visible",
+            // so it regenerates meshes and submits draw calls for the whole map.
+            var map = Find.CurrentMap;
+            CellRect mapRect = new CellRect(0, 0, map.Size.x, map.Size.z);
+
+            var traverse = Traverse.Create(camDriver);
+            traverse.Field("lastViewRect").SetValue(mapRect);
+            traverse.Field("lastViewRectGetFrame").SetValue(Time.frameCount);
+
+            // Wait one frame — RimWorld's normal pipeline runs with the spoofed ViewRect,
+            // regenerating all section meshes and drawing them into GPU memory.
+            yield return new WaitForEndOfFrame();
+
+            // Now render each colonist's view to a RenderTexture
+            for (int i = 0; i < requests.Count; i++)
             {
-                // The camera just finished rendering to the screen buffer.
-                // Read the full viewport, then resize to the requested size.
-                int w = cam.pixelWidth;
-                int h = cam.pixelHeight;
+                var req = requests[i];
+                try
+                {
+                    Vector3 targetPos = req.CenterCell.ToVector3Shifted();
+                    camera.transform.position = new Vector3(targetPos.x, originalPos.y, targetPos.z);
+                    camera.orthographicSize = req.CameraSize;
+                    camera.farClipPlane = originalPos.y + 6.5f;
 
-                var screenTex = new Texture2D(w, h, TextureFormat.RGB24, false);
-                screenTex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
-                screenTex.Apply();
+                    var rt = RenderTexture.GetTemporary(req.PixelSize, req.PixelSize, 24);
+                    camera.targetTexture = rt;
+                    camera.Render();
+                    camera.targetTexture = originalTarget;
 
-                // Blit into a square RenderTexture at the target resolution
-                var rt = RenderTexture.GetTemporary(size, size);
-                Graphics.Blit(screenTex, rt);
-                UnityEngine.Object.Destroy(screenTex);
+                    RenderTexture.active = rt;
+                    var tex = new Texture2D(req.PixelSize, req.PixelSize, TextureFormat.RGB24, false);
+                    tex.ReadPixels(new Rect(0, 0, req.PixelSize, req.PixelSize), 0, 0);
+                    tex.Apply();
+                    RenderTexture.active = null;
+                    RenderTexture.ReleaseTemporary(rt);
 
-                RenderTexture.active = rt;
-                var resized = new Texture2D(size, size, TextureFormat.RGB24, false);
-                resized.ReadPixels(new Rect(0, 0, size, size), 0, 0);
-                resized.Apply();
-                RenderTexture.active = null;
-                RenderTexture.ReleaseTemporary(rt);
+                    byte[] png = tex.EncodeToPNG();
+                    UnityEngine.Object.Destroy(tex);
 
-                var png = resized.EncodeToPNG();
-                UnityEngine.Object.Destroy(resized);
-
-                callback?.Invoke(Convert.ToBase64String(png));
+                    results[i] = Convert.ToBase64String(png);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("[RimBot] Capture failed for request " + i + ": " + ex.Message);
+                    results[i] = null;
+                }
             }
-            catch (Exception ex)
-            {
-                Log.Error("[RimBot] Screenshot capture failed: " + ex.Message);
-                callback?.Invoke(null);
-            }
-        }
 
-        /// <summary>
-        /// Captures an arbitrary map area. For future use — must be called during
-        /// the render phase (e.g. from a camera callback), not from a tick.
-        /// </summary>
-        public static string CaptureArea(IntVec3 centerCell, float cameraSize = 24f, int pixelSize = 512)
-        {
-            try
-            {
-                var cam = Find.Camera;
-                var originalTarget = cam.targetTexture;
-                var originalPos = cam.transform.position;
-                var originalOrthoSize = cam.orthographicSize;
+            // Restore camera state
+            camera.targetTexture = originalTarget;
+            camera.transform.position = originalPos;
+            camera.orthographicSize = originalOrthoSize;
+            camera.farClipPlane = originalFarClip;
+            camDriver.enabled = true;
 
-                var worldPos = centerCell.ToVector3Shifted();
-                cam.transform.position = new Vector3(worldPos.x, originalPos.y, worldPos.z);
-                cam.orthographicSize = cameraSize;
-
-                var rt = RenderTexture.GetTemporary(pixelSize, pixelSize, 24);
-                cam.targetTexture = rt;
-                cam.Render();
-                cam.targetTexture = originalTarget;
-
-                cam.transform.position = originalPos;
-                cam.orthographicSize = originalOrthoSize;
-
-                RenderTexture.active = rt;
-                var tex = new Texture2D(pixelSize, pixelSize, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, pixelSize, pixelSize), 0, 0);
-                tex.Apply();
-                RenderTexture.active = null;
-
-                var png = tex.EncodeToPNG();
-                UnityEngine.Object.Destroy(tex);
-                RenderTexture.ReleaseTemporary(rt);
-
-                return Convert.ToBase64String(png);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("[RimBot] Area capture failed: " + ex.Message);
-                return null;
-            }
+            onComplete?.Invoke(results);
         }
     }
 }

@@ -78,8 +78,9 @@
     <Compile Include="Models\OpenAIModel.cs" />
     <Compile Include="Models\GoogleModel.cs" />
     <Compile Include="Models\LLMModelFactory.cs" />
+    <Compile Include="Brain.cs" />
+    <Compile Include="BrainManager.cs" />
     <Compile Include="ScreenshotCapture.cs" />
-    <Compile Include="ScreenshotLoop.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

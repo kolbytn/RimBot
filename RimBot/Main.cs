@@ -28,7 +28,7 @@ namespace RimBot
         public static void Postfix()
         {
             LLMTestUtility.ProcessMainThreadQueue();
-            ScreenshotLoop.Tick();
+            BrainManager.Tick();
         }
     }
 }
