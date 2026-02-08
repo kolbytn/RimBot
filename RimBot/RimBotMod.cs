@@ -1,4 +1,3 @@
-using RimBot.Models;
 using UnityEngine;
 using Verse;
 
@@ -23,43 +22,24 @@ namespace RimBot
             var listing = new Listing_Standard();
             listing.Begin(inRect);
 
-            listing.Label("LLM Provider:");
-            if (listing.RadioButton("Anthropic", Settings.activeProvider == LLMProviderType.Anthropic))
-            {
-                Settings.activeProvider = LLMProviderType.Anthropic;
-            }
-            if (listing.RadioButton("OpenAI", Settings.activeProvider == LLMProviderType.OpenAI))
-            {
-                Settings.activeProvider = LLMProviderType.OpenAI;
-            }
-            if (listing.RadioButton("Google Gemini", Settings.activeProvider == LLMProviderType.Google))
-            {
-                Settings.activeProvider = LLMProviderType.Google;
-            }
+            listing.Label("Anthropic API Key:");
+            var newAnthropicKey = listing.TextEntry(Settings.anthropicApiKey);
+            if (newAnthropicKey != Settings.anthropicApiKey)
+                Settings.anthropicApiKey = newAnthropicKey;
 
-            listing.GapLine();
+            listing.Gap();
 
-            listing.Label("API Key (" + Settings.activeProvider + "):");
-            var currentKey = Settings.GetActiveApiKey();
-            var newKey = listing.TextEntry(currentKey);
-            if (newKey != currentKey)
-            {
-                Settings.SetActiveApiKey(newKey);
-            }
+            listing.Label("OpenAI API Key:");
+            var newOpenAIKey = listing.TextEntry(Settings.openAIApiKey);
+            if (newOpenAIKey != Settings.openAIApiKey)
+                Settings.openAIApiKey = newOpenAIKey;
 
-            listing.GapLine();
+            listing.Gap();
 
-            listing.Label("Model:");
-            var llmModel = LLMModelFactory.GetModel(Settings.activeProvider);
-            var availableModels = llmModel.GetAvailableModels();
-            var activeModel = Settings.GetActiveModel();
-            foreach (var model in availableModels)
-            {
-                if (listing.RadioButton(model, activeModel == model))
-                {
-                    Settings.SetActiveModel(model);
-                }
-            }
+            listing.Label("Google API Key:");
+            var newGoogleKey = listing.TextEntry(Settings.googleApiKey);
+            if (newGoogleKey != Settings.googleApiKey)
+                Settings.googleApiKey = newGoogleKey;
 
             listing.GapLine();
 
@@ -71,6 +51,16 @@ namespace RimBot
             if (listing.ButtonText("Send Test Message"))
             {
                 LLMTestUtility.SendTestMessage();
+            }
+
+            if (listing.ButtonText(SelectionTest.IsRunning ? "Stop Selection Test" : "Run Selection Test"))
+            {
+                SelectionTest.Toggle();
+            }
+
+            if (listing.ButtonText("View Selection Test Results"))
+            {
+                Find.WindowStack.Add(new SelectionTestWindow());
             }
 
             listing.End();

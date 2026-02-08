@@ -14,52 +14,66 @@ namespace RimBot
         public static void SendTestMessage()
         {
             var settings = RimBotMod.Settings;
-            var apiKey = settings.GetActiveApiKey();
-            var model = settings.GetActiveModel();
-            var provider = settings.activeProvider;
             var maxTokens = settings.maxTokens;
 
-            if (string.IsNullOrEmpty(apiKey))
+            // Test each provider that has an API key
+            var providers = new[]
             {
-                Log.Warning("[RimBot] No API key set for " + provider);
-                return;
-            }
-
-            Log.Message("[RimBot] Sending test message via " + provider + " using model " + model + "...");
-
-            var llmModel = LLMModelFactory.GetModel(provider);
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage("system", "You are a helpful assistant in the game RimWorld. Keep responses brief."),
-                new ChatMessage("user", "Hello! Please respond with a short greeting to confirm you're working.")
+                new { Type = LLMProviderType.Anthropic, Key = settings.anthropicApiKey },
+                new { Type = LLMProviderType.OpenAI, Key = settings.openAIApiKey },
+                new { Type = LLMProviderType.Google, Key = settings.googleApiKey }
             };
 
-            Task.Run(async () =>
+            bool anyTested = false;
+            foreach (var p in providers)
             {
-                try
+                if (string.IsNullOrEmpty(p.Key))
+                    continue;
+
+                anyTested = true;
+                var llmModel = LLMModelFactory.GetModel(p.Type);
+                var model = llmModel.GetAvailableModels()[0];
+                var apiKey = p.Key;
+                var providerType = p.Type;
+
+                Log.Message("[RimBot] Sending test message via " + providerType + " using model " + model + "...");
+
+                var messages = new List<ChatMessage>
                 {
-                    var response = await llmModel.SendChatRequest(messages, model, apiKey, maxTokens);
-                    MainThreadQueue.Enqueue(() =>
-                    {
-                        if (response.Success)
-                        {
-                            Log.Message("[RimBot] Response: " + response.Content);
-                            Log.Message("[RimBot] Tokens used: " + response.TokensUsed);
-                        }
-                        else
-                        {
-                            Log.Error("[RimBot] Error: " + response.ErrorMessage);
-                        }
-                    });
-                }
-                catch (Exception ex)
+                    new ChatMessage("system", "You are a helpful assistant in the game RimWorld. Keep responses brief."),
+                    new ChatMessage("user", "Hello! Please respond with a short greeting to confirm you're working.")
+                };
+
+                Task.Run(async () =>
                 {
-                    MainThreadQueue.Enqueue(() =>
+                    try
                     {
-                        Log.Error("[RimBot] Test message failed: " + ex.Message);
-                    });
-                }
-            });
+                        var response = await llmModel.SendChatRequest(messages, model, apiKey, maxTokens);
+                        MainThreadQueue.Enqueue(() =>
+                        {
+                            if (response.Success)
+                            {
+                                Log.Message("[RimBot] [" + providerType + "] Response: " + response.Content);
+                                Log.Message("[RimBot] [" + providerType + "] Tokens used: " + response.TokensUsed);
+                            }
+                            else
+                            {
+                                Log.Error("[RimBot] [" + providerType + "] Error: " + response.ErrorMessage);
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        MainThreadQueue.Enqueue(() =>
+                        {
+                            Log.Error("[RimBot] [" + providerType + "] Test message failed: " + ex.Message);
+                        });
+                    }
+                });
+            }
+
+            if (!anyTested)
+                Log.Warning("[RimBot] No API keys configured.");
         }
 
         public static void ProcessMainThreadQueue()

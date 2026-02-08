@@ -7,6 +7,8 @@ namespace RimBot.Models
         public string ErrorMessage { get; set; }
         public string RawJson { get; set; }
         public int TokensUsed { get; set; }
+        public string ImageBase64 { get; set; }
+        public string ImageMediaType { get; set; }
 
         public static ModelResponse FromError(string errorMessage)
         {

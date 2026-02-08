@@ -13,14 +13,19 @@ namespace RimBot.Models
         private static readonly HttpClient Client = new HttpClient();
 
         public LLMProviderType ProviderType => LLMProviderType.Anthropic;
+        public bool SupportsImageOutput => false;
+
+        public Task<ModelResponse> SendImageRequest(List<ChatMessage> messages, string model, string apiKey, int maxTokens)
+        {
+            return Task.FromResult(ModelResponse.FromError("Anthropic does not support image output."));
+        }
 
         public string[] GetAvailableModels()
         {
             return new[]
             {
-                "claude-opus-4-6",
-                "claude-sonnet-4-5-20250929",
-                "claude-haiku-4-5-20251001"
+                "claude-haiku-4-5-20251001",
+                "claude-sonnet-4-5-20250929"
             };
         }
 
@@ -95,7 +100,8 @@ namespace RimBot.Models
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ModelResponse.FromError($"Anthropic API error ({response.StatusCode}): {responseJson}");
+                    var flat = responseJson.Replace("\n", " ").Replace("\r", "");
+                    return ModelResponse.FromError($"Anthropic API error ({response.StatusCode}): {flat}");
                 }
 
                 var parsed = JObject.Parse(responseJson);
