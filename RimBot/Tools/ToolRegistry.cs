@@ -17,6 +17,11 @@ namespace RimBot.Tools
 
             Register(new GetScreenshotTool());
             Register(new ArchitectStructureTool());
+            Register(new InspectCellTool());
+            Register(new ScanAreaTool());
+            Register(new FindOnMapTool());
+            Register(new GetPawnStatusTool());
+            Register(new DesignateTool());
         }
 
         private static void Register(ITool tool)

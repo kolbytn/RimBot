@@ -14,7 +14,8 @@ namespace RimBot
         private static readonly ConcurrentQueue<Action> mainThreadQueue = new ConcurrentQueue<Action>();
         private static float lastCaptureTime;
         private static bool captureInProgress;
-        private const float IntervalSeconds = 20f;
+        private const float CaptureIntervalSeconds = 20f;
+        private const float MinAgentCooldownSeconds = 2f;
         private static int nextAssignmentIndex;
         private static bool extraColonistsSpawned;
 
@@ -70,7 +71,7 @@ namespace RimBot
                 // Legacy capture-first path for selection test
                 if (captureInProgress)
                     return;
-                if (Time.realtimeSinceStartup - lastCaptureTime < IntervalSeconds)
+                if (Time.realtimeSinceStartup - lastCaptureTime < CaptureIntervalSeconds)
                     return;
 
                 lastCaptureTime = Time.realtimeSinceStartup;
@@ -78,16 +79,19 @@ namespace RimBot
             }
             else
             {
-                // Agent mode: agents request their own screenshots via tools
-                if (Time.realtimeSinceStartup - lastCaptureTime < IntervalSeconds)
-                    return;
-
-                lastCaptureTime = Time.realtimeSinceStartup;
-
+                // Agent mode: restart each brain as soon as it's idle (with minimum cooldown)
+                float now = Time.realtimeSinceStartup;
                 foreach (var kvp in brains)
                 {
-                    if (kvp.Value.IsIdle)
-                        kvp.Value.RunAgentLoop();
+                    var brain = kvp.Value;
+                    if (!brain.IsIdle || brain.IsPaused)
+                        continue;
+
+                    float sinceLastRun = now - brain.LastRunStartedAt;
+                    if (sinceLastRun < MinAgentCooldownSeconds)
+                        continue;
+
+                    brain.RunAgentLoop();
                 }
             }
         }

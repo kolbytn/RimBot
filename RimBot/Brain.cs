@@ -27,8 +27,13 @@ namespace RimBot
         private const int MaxHistoryEntries = 50;
         private List<ChatMessage> agentConversation;
         private const int MaxConversationMessages = 30;
+        private float lastRunStartedAt = float.MinValue;
+        private float pauseUntil;
 
         public bool IsIdle => state == State.Idle;
+        public float LastRunStartedAt => lastRunStartedAt;
+        public bool IsPaused => Time.realtimeSinceStartup < pauseUntil;
+        private const float ErrorPauseSeconds = 30f;
         public IReadOnlyList<HistoryEntry> History => history;
 
         public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, MapSelectionMode preferredMode)
@@ -41,12 +46,21 @@ namespace RimBot
             PreferredMode = preferredMode;
         }
 
+        public void PauseFor(float seconds)
+        {
+            pauseUntil = Time.realtimeSinceStartup + seconds;
+            Log.Warning("[RimBot] [AGENT] [" + PawnLabel + "] Pausing for " + (int)seconds + "s");
+        }
+
         public void RunAgentLoop()
         {
             if (state != State.Idle)
                 return;
 
             state = State.WaitingForLLM;
+
+            float elapsed = lastRunStartedAt > 0 ? Time.realtimeSinceStartup - lastRunStartedAt : 0;
+            lastRunStartedAt = Time.realtimeSinceStartup;
 
             var maxTokens = RimBotMod.Settings.maxTokens;
             var llmModel = LLMModelFactory.GetModel(Provider);
@@ -66,6 +80,17 @@ namespace RimBot
             var pawnPos = pawn.Position;
             var map = Find.CurrentMap;
 
+            // Get pawn's current job for context
+            string currentActivity = "idle";
+            if (pawn.CurJob != null)
+            {
+                currentActivity = pawn.CurJob.def.reportString;
+                if (string.IsNullOrEmpty(currentActivity))
+                    currentActivity = pawn.CurJob.def.label;
+            }
+            if (pawn.MentalState != null)
+                currentActivity = "mental break: " + pawn.MentalState.def.label;
+
             bool isFirstCycle = agentConversation == null;
 
             if (isFirstCycle)
@@ -74,26 +99,32 @@ namespace RimBot
 
                 var sysPrompt = "You are the brain of a RimWorld colonist named " + label + ". Play RimWorld. " +
                     "You have tools to observe and interact with the world. Use get_screenshot to see " +
-                    "your surroundings and architect_structure to place wall/door blueprints. " +
+                    "your surroundings, inspect_cell and scan_area to examine locations in detail, " +
+                    "find_on_map to locate resources, get_pawn_status to check colonist status, " +
+                    "architect_structure to place blueprints (walls, doors, beds, tables, campfires, and more), " +
+                    "and designate to order harvesting, mining, hauling, hunting, and deconstruction. " +
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
                     "Build rooms, expand the colony, and make decisions as you see fit.";
 
                 agentConversation = new List<ChatMessage>
                 {
                     new ChatMessage("system", sysPrompt),
-                    new ChatMessage("user", "Begin. Take a screenshot to observe your surroundings, then plan and place structures.")
+                    new ChatMessage("user", "Begin. You are currently " + currentActivity +
+                        ". Take a screenshot to observe your surroundings, then decide what to do.")
                 };
             }
             else
             {
+                int elapsedSeconds = (int)elapsed;
                 Log.Message("[RimBot] [AGENT] [" + label + "] Continuing conversation (" +
-                    agentConversation.Count + " messages)...");
+                    agentConversation.Count + " messages, " + elapsedSeconds + "s elapsed)...");
 
                 // Trim conversation if too long — keep system + first user + last N messages
                 TrimConversation();
 
                 agentConversation.Add(new ChatMessage("user",
-                    "Continue. 20 seconds have passed. Take a screenshot to see your surroundings and continue building."));
+                    "Continue. " + elapsedSeconds + " seconds have passed. You are currently " +
+                    currentActivity + ". Take a screenshot to see your surroundings and decide what to do next."));
             }
 
             var messages = new List<ChatMessage>(agentConversation);
@@ -131,6 +162,10 @@ namespace RimBot
                         {
                             Log.Error("[RimBot] [AGENT] [" + label + "] Failed: " +
                                 result.ErrorMessage);
+
+                            // Pause on rate limit or persistent API errors
+                            if (IsRateLimitError(result.ErrorMessage))
+                                PauseFor(ErrorPauseSeconds);
                         }
 
                         // Persist the conversation for next cycle
@@ -152,6 +187,19 @@ namespace RimBot
                     state = State.Idle;
                 }
             });
+        }
+
+        private static bool IsRateLimitError(string errorMessage)
+        {
+            if (string.IsNullOrEmpty(errorMessage))
+                return false;
+            // Anthropic: "rate_limit_error" / "TooManyRequests"
+            // OpenAI: "Rate limit" / HTTP 429
+            // Google: "RESOURCE_EXHAUSTED" / HTTP 429
+            var lower = errorMessage.ToLower();
+            return lower.Contains("rate_limit") || lower.Contains("rate limit") ||
+                   lower.Contains("toomanyrequests") || lower.Contains("429") ||
+                   lower.Contains("resource_exhausted") || lower.Contains("quota");
         }
 
         private void TrimConversation()

@@ -99,6 +99,11 @@
     <Compile Include="Tools\ArchitectStructureTool.cs" />
     <Compile Include="Tools\ArchitectStructureImageTool.cs" />
     <Compile Include="Tools\ToolRegistry.cs" />
+    <Compile Include="Tools\InspectCellTool.cs" />
+    <Compile Include="Tools\ScanAreaTool.cs" />
+    <Compile Include="Tools\FindOnMapTool.cs" />
+    <Compile Include="Tools\GetPawnStatusTool.cs" />
+    <Compile Include="Tools\DesignateTool.cs" />
     <Compile Include="SelectionTestWindow.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
