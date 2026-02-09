@@ -241,11 +241,6 @@ namespace RimBot.Models
                         {
                             ["content"] = part.Text ?? ""
                         };
-                        // Add image data inline if present
-                        if (!string.IsNullOrEmpty(part.Base64Data))
-                        {
-                            responseObj["image_data"] = part.Base64Data;
-                        }
                         partsArray.Add(new JObject
                         {
                             ["functionResponse"] = new JObject
@@ -254,6 +249,18 @@ namespace RimBot.Models
                                 ["response"] = responseObj
                             }
                         });
+                        // Send image as a proper inline_data part (not as text in functionResponse)
+                        if (!string.IsNullOrEmpty(part.Base64Data))
+                        {
+                            partsArray.Add(new JObject
+                            {
+                                ["inline_data"] = new JObject
+                                {
+                                    ["mime_type"] = part.MediaType ?? "image/png",
+                                    ["data"] = part.Base64Data
+                                }
+                            });
+                        }
                     }
                 }
 
