@@ -93,6 +93,12 @@
     <Compile Include="ScreenshotCapture.cs" />
     <Compile Include="SelectionTest.cs" />
     <Compile Include="ArchitectMode.cs" />
+    <Compile Include="AgentRunner.cs" />
+    <Compile Include="Tools\ToolTypes.cs" />
+    <Compile Include="Tools\GetScreenshotTool.cs" />
+    <Compile Include="Tools\ArchitectStructureTool.cs" />
+    <Compile Include="Tools\ArchitectStructureImageTool.cs" />
+    <Compile Include="Tools\ToolRegistry.cs" />
     <Compile Include="SelectionTestWindow.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

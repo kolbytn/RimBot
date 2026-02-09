@@ -25,6 +25,17 @@ namespace RimBot
             return brain;
         }
 
+        public static Pawn FindPawnById(int pawnId)
+        {
+            var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
+            foreach (var pawn in colonists)
+            {
+                if (pawn.thingIDNumber == pawnId)
+                    return pawn;
+            }
+            return null;
+        }
+
         public static void EnqueueMainThread(Action action)
         {
             mainThreadQueue.Enqueue(action);
@@ -49,29 +60,53 @@ namespace RimBot
             if (Find.CurrentMap == null)
                 return;
 
-            EnsureFiveColonists();
+            EnsureColonists();
             SelectionTest.CheckAutoStart();
             ArchitectMode.CheckAutoStart();
             SyncBrains();
 
-            if (captureInProgress)
-                return;
-            if (Time.realtimeSinceStartup - lastCaptureTime < IntervalSeconds)
-                return;
+            if (SelectionTest.IsRunning)
+            {
+                // Legacy capture-first path for selection test
+                if (captureInProgress)
+                    return;
+                if (Time.realtimeSinceStartup - lastCaptureTime < IntervalSeconds)
+                    return;
 
-            lastCaptureTime = Time.realtimeSinceStartup;
-            CaptureAll();
+                lastCaptureTime = Time.realtimeSinceStartup;
+                CaptureAll();
+            }
+            else
+            {
+                // Agent mode: agents request their own screenshots via tools
+                if (Time.realtimeSinceStartup - lastCaptureTime < IntervalSeconds)
+                    return;
+
+                lastCaptureTime = Time.realtimeSinceStartup;
+
+                foreach (var kvp in brains)
+                {
+                    if (kvp.Value.IsIdle)
+                        kvp.Value.RunAgentLoop();
+                }
+            }
         }
 
-        private static void EnsureFiveColonists()
+        private static void EnsureColonists()
         {
             if (extraColonistsSpawned)
                 return;
             extraColonistsSpawned = true;
 
+            var settings = RimBotMod.Settings;
+            var assignments = GetFixedAssignments(settings);
+            int target = assignments.Count;
+            if (target == 0)
+                return;
+
             var map = Find.CurrentMap;
             var colonists = map.mapPawns.FreeColonistsSpawned;
-            int needed = 5 - colonists.Count;
+            int needed = target - colonists.Count;
 
             if (needed <= 0)
                 return;
@@ -86,7 +121,7 @@ namespace RimBot
                 GenSpawn.Spawn(pawn, CellFinder.RandomClosewalkCellNear(map.Center, map, 5), map);
             }
 
-            Log.Message("[RimBot] Spawned " + needed + " extra colonists (total target: 5).");
+            Log.Message("[RimBot] Spawned " + needed + " extra colonists (total target: " + target + ").");
         }
 
         private static void CaptureAll()
@@ -142,7 +177,6 @@ namespace RimBot
         {
             var result = new List<ProviderAssignment>();
 
-            // 1. Claude Haiku - text coordinates
             if (!string.IsNullOrEmpty(settings.anthropicApiKey))
             {
                 result.Add(new ProviderAssignment
@@ -154,7 +188,6 @@ namespace RimBot
                 });
             }
 
-            // 2. Gemini Flash - text coordinates
             if (!string.IsNullOrEmpty(settings.googleApiKey))
             {
                 result.Add(new ProviderAssignment
@@ -166,19 +199,6 @@ namespace RimBot
                 });
             }
 
-            // 3. Gemini Flash - image mask
-            if (!string.IsNullOrEmpty(settings.googleApiKey))
-            {
-                result.Add(new ProviderAssignment
-                {
-                    Provider = LLMProviderType.Google,
-                    Model = "gemini-3-flash-preview",
-                    ApiKey = settings.googleApiKey,
-                    Mode = MapSelectionMode.Mask
-                });
-            }
-
-            // 4. GPT-5 Mini - text coordinates
             if (!string.IsNullOrEmpty(settings.openAIApiKey))
             {
                 result.Add(new ProviderAssignment
@@ -187,18 +207,6 @@ namespace RimBot
                     Model = "gpt-5-mini",
                     ApiKey = settings.openAIApiKey,
                     Mode = MapSelectionMode.Coordinates
-                });
-            }
-
-            // 5. GPT-5 Mini - image mask
-            if (!string.IsNullOrEmpty(settings.openAIApiKey))
-            {
-                result.Add(new ProviderAssignment
-                {
-                    Provider = LLMProviderType.OpenAI,
-                    Model = "gpt-5-mini",
-                    ApiKey = settings.openAIApiKey,
-                    Mode = MapSelectionMode.Mask
                 });
             }
 
@@ -253,17 +261,6 @@ namespace RimBot
                         + " (" + a.Provider + ", " + a.Model + ", " + a.Mode + ")");
                 }
             }
-        }
-
-        private static Pawn FindPawnById(int pawnId)
-        {
-            var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
-            foreach (var pawn in colonists)
-            {
-                if (pawn.thingIDNumber == pawnId)
-                    return pawn;
-            }
-            return null;
         }
     }
 }

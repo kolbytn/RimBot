@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Verse;
 
@@ -45,6 +46,22 @@ namespace RimBot
 
             Settings.maxTokens = (int)listing.Slider(Settings.maxTokens, 64, 4096);
             listing.Label("Max Tokens: " + Settings.maxTokens);
+
+            listing.Gap();
+
+            Settings.thinkingBudget = (int)(listing.Slider(Settings.thinkingBudget, 0, 8192) / 256) * 256;
+            listing.Label("Thinking Budget: " + (Settings.thinkingBudget == 0 ? "Disabled" : Settings.thinkingBudget.ToString()));
+
+            listing.GapLine();
+
+            // Placement mode cycle button
+            var modeNames = Enum.GetNames(typeof(PlacementMode));
+            var currentMode = Settings.placementMode;
+            if (listing.ButtonText("Placement Mode: " + currentMode))
+            {
+                int next = ((int)currentMode + 1) % modeNames.Length;
+                Settings.placementMode = (PlacementMode)next;
+            }
 
             listing.GapLine();
 

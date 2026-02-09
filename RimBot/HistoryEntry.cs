@@ -1,9 +1,25 @@
 using System;
+using System.Collections.Generic;
 using RimBot.Models;
 using UnityEngine;
 
 namespace RimBot
 {
+    public class ToolCallRecord
+    {
+        public string Id;
+        public string Name;
+        public string ArgumentsJson;
+    }
+
+    public class ToolResultRecord
+    {
+        public string ToolCallId;
+        public bool Success;
+        public string Content;
+        public bool HasImage;
+    }
+
     public class HistoryEntry
     {
         public int GameTick;
@@ -15,6 +31,14 @@ namespace RimBot
         public LLMProviderType Provider;
         public string ModelName;
         public string ScreenshotBase64;
+        public List<ToolCallRecord> ToolCalls;
+        public List<ToolResultRecord> ToolResults;
+        public int? AgentIteration;
+        public string ThinkingText;
+        public int InputTokens;
+        public int OutputTokens;
+        public int CacheReadTokens;
+        public int ReasoningTokens;
 
         private Texture2D cachedTexture;
 

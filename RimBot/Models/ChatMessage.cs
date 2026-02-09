@@ -12,6 +12,16 @@ namespace RimBot.Models
 
         public bool HasImages => ContentParts?.Any(p => p.Type == "image_url") == true;
 
+        public bool HasToolUse => ContentParts?.Any(p => p.Type == "tool_use") == true;
+
+        public bool HasToolResult => ContentParts?.Any(p => p.Type == "tool_result") == true;
+
+        public IEnumerable<ContentPart> ToolUseParts =>
+            ContentParts?.Where(p => p.Type == "tool_use") ?? Enumerable.Empty<ContentPart>();
+
+        public IEnumerable<ContentPart> ToolResultParts =>
+            ContentParts?.Where(p => p.Type == "tool_result") ?? Enumerable.Empty<ContentPart>();
+
         public ChatMessage(string role, string content)
         {
             Role = role;

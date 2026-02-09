@@ -99,21 +99,65 @@ namespace RimBot
 
             float textWidth = width - 12f;
 
+            // Token info line
+            height += 18f;
+
             // Screenshot thumbnail
             if (!string.IsNullOrEmpty(entry.ScreenshotBase64))
                 height += ThumbnailSize + 4f;
 
-            // System prompt
-            height += 18f; // label
-            height += Text.CalcHeight(entry.SystemPrompt ?? "", textWidth) + 4f;
+            // System prompt (only for first agent iteration or non-agent)
+            if (!string.IsNullOrEmpty(entry.SystemPrompt))
+            {
+                height += 18f; // label
+                height += Text.CalcHeight(entry.SystemPrompt, textWidth) + 4f;
+            }
+
+            // Thinking text
+            if (!string.IsNullOrEmpty(entry.ThinkingText))
+            {
+                height += 18f; // label
+                height += Text.CalcHeight(entry.ThinkingText, textWidth) + 4f;
+            }
 
             // User query
-            height += 18f; // label
-            height += Text.CalcHeight(entry.UserQuery ?? "", textWidth) + 4f;
+            if (!string.IsNullOrEmpty(entry.UserQuery))
+            {
+                height += 18f; // label
+                height += Text.CalcHeight(entry.UserQuery, textWidth) + 4f;
+            }
 
             // Response
-            height += 18f; // label
-            height += Text.CalcHeight(entry.ResponseText ?? "", textWidth) + 4f;
+            if (!string.IsNullOrEmpty(entry.ResponseText))
+            {
+                height += 18f; // label
+                height += Text.CalcHeight(entry.ResponseText, textWidth) + 4f;
+            }
+
+            // Tool calls
+            if (entry.ToolCalls != null && entry.ToolCalls.Count > 0)
+            {
+                height += 18f; // "Tool Calls:" label
+                foreach (var tc in entry.ToolCalls)
+                {
+                    string callText = tc.Name + "(" + tc.ArgumentsJson + ")";
+                    height += Text.CalcHeight(callText, textWidth) + 2f;
+                }
+                height += 4f;
+            }
+
+            // Tool results
+            if (entry.ToolResults != null && entry.ToolResults.Count > 0)
+            {
+                height += 18f; // "Tool Results:" label
+                foreach (var tr in entry.ToolResults)
+                {
+                    string resultText = (tr.Success ? "[OK] " : "[FAIL] ") + tr.Content;
+                    if (tr.HasImage) resultText += " [+image]";
+                    height += Text.CalcHeight(resultText, textWidth) + 2f;
+                }
+                height += 4f;
+            }
 
             height += 4f; // bottom padding
             return height;
@@ -137,8 +181,10 @@ namespace RimBot
             int day = ticks / 60000 + 1;
             int hour = (ticks % 60000) / 2500;
 
-            string headerText = "Day " + day + " " + hour + "h | " + entry.Mode
-                + " | " + entry.Provider + "/" + entry.ModelName;
+            string headerText = "Day " + day + " " + hour + "h | " + entry.Mode;
+            if (entry.AgentIteration.HasValue)
+                headerText += " (iter " + entry.AgentIteration.Value + ")";
+            headerText += " | " + entry.Provider + "/" + entry.ModelName;
             if (!entry.Success)
                 headerText += " [FAILED]";
 
@@ -162,6 +208,18 @@ namespace RimBot
             float textWidth = rect.width - 12f;
             float textX = rect.x + 6f;
 
+            // Token info line
+            Text.Font = GameFont.Tiny;
+            GUI.color = new Color(0.6f, 0.6f, 0.8f);
+            string tokenInfo = "Tokens: " + entry.InputTokens + " in / " + entry.OutputTokens + " out";
+            if (entry.CacheReadTokens > 0)
+                tokenInfo += " / " + entry.CacheReadTokens + " cache";
+            if (entry.ReasoningTokens > 0)
+                tokenInfo += " / " + entry.ReasoningTokens + " reasoning";
+            Widgets.Label(new Rect(textX, cy, textWidth, 18f), tokenInfo);
+            GUI.color = Color.white;
+            cy += 18f;
+
             // Screenshot thumbnail
             if (!string.IsNullOrEmpty(entry.ScreenshotBase64))
             {
@@ -174,37 +232,101 @@ namespace RimBot
             }
 
             // System prompt
-            Text.Font = GameFont.Tiny;
-            GUI.color = new Color(0.7f, 0.7f, 0.7f);
-            Widgets.Label(new Rect(textX, cy, textWidth, 18f), "System Prompt:");
-            cy += 18f;
-            GUI.color = Color.white;
-            Text.Font = GameFont.Small;
-            float sysH = Text.CalcHeight(entry.SystemPrompt ?? "", textWidth);
-            Widgets.Label(new Rect(textX, cy, textWidth, sysH), entry.SystemPrompt ?? "");
-            cy += sysH + 4f;
+            if (!string.IsNullOrEmpty(entry.SystemPrompt))
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.7f, 0.7f, 0.7f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "System Prompt:");
+                cy += 18f;
+                GUI.color = Color.white;
+                Text.Font = GameFont.Small;
+                float sysH = Text.CalcHeight(entry.SystemPrompt, textWidth);
+                Widgets.Label(new Rect(textX, cy, textWidth, sysH), entry.SystemPrompt);
+                cy += sysH + 4f;
+            }
+
+            // Thinking text
+            if (!string.IsNullOrEmpty(entry.ThinkingText))
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.5f, 0.8f, 0.9f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "Thinking:");
+                cy += 18f;
+                Text.Font = GameFont.Small;
+                float thinkH = Text.CalcHeight(entry.ThinkingText, textWidth);
+                Widgets.Label(new Rect(textX, cy, textWidth, thinkH), entry.ThinkingText);
+                GUI.color = Color.white;
+                cy += thinkH + 4f;
+            }
 
             // User query
-            Text.Font = GameFont.Tiny;
-            GUI.color = new Color(0.7f, 0.7f, 0.7f);
-            Widgets.Label(new Rect(textX, cy, textWidth, 18f), "User Query:");
-            cy += 18f;
-            GUI.color = Color.white;
-            Text.Font = GameFont.Small;
-            float queryH = Text.CalcHeight(entry.UserQuery ?? "", textWidth);
-            Widgets.Label(new Rect(textX, cy, textWidth, queryH), entry.UserQuery ?? "");
-            cy += queryH + 4f;
+            if (!string.IsNullOrEmpty(entry.UserQuery))
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.7f, 0.7f, 0.7f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "User Query:");
+                cy += 18f;
+                GUI.color = Color.white;
+                Text.Font = GameFont.Small;
+                float queryH = Text.CalcHeight(entry.UserQuery, textWidth);
+                Widgets.Label(new Rect(textX, cy, textWidth, queryH), entry.UserQuery);
+                cy += queryH + 4f;
+            }
 
             // Response
-            Text.Font = GameFont.Tiny;
-            GUI.color = new Color(0.7f, 0.7f, 0.7f);
-            Widgets.Label(new Rect(textX, cy, textWidth, 18f), "Response:");
-            cy += 18f;
-            GUI.color = entry.Success ? new Color(0.6f, 1f, 0.6f) : new Color(1f, 0.5f, 0.5f);
-            Text.Font = GameFont.Small;
-            float respH = Text.CalcHeight(entry.ResponseText ?? "", textWidth);
-            Widgets.Label(new Rect(textX, cy, textWidth, respH), entry.ResponseText ?? "");
-            GUI.color = Color.white;
+            if (!string.IsNullOrEmpty(entry.ResponseText))
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.7f, 0.7f, 0.7f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "Response:");
+                cy += 18f;
+                GUI.color = entry.Success ? new Color(0.6f, 1f, 0.6f) : new Color(1f, 0.5f, 0.5f);
+                Text.Font = GameFont.Small;
+                float respH = Text.CalcHeight(entry.ResponseText, textWidth);
+                Widgets.Label(new Rect(textX, cy, textWidth, respH), entry.ResponseText);
+                GUI.color = Color.white;
+                cy += respH + 4f;
+            }
+
+            // Tool calls
+            if (entry.ToolCalls != null && entry.ToolCalls.Count > 0)
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(1f, 0.85f, 0.4f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "Tool Calls:");
+                cy += 18f;
+                Text.Font = GameFont.Small;
+                foreach (var tc in entry.ToolCalls)
+                {
+                    string callText = tc.Name + "(" + tc.ArgumentsJson + ")";
+                    float callH = Text.CalcHeight(callText, textWidth);
+                    Widgets.Label(new Rect(textX, cy, textWidth, callH), callText);
+                    cy += callH + 2f;
+                }
+                GUI.color = Color.white;
+                cy += 4f;
+            }
+
+            // Tool results
+            if (entry.ToolResults != null && entry.ToolResults.Count > 0)
+            {
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.7f, 0.7f, 0.7f);
+                Widgets.Label(new Rect(textX, cy, textWidth, 18f), "Tool Results:");
+                cy += 18f;
+                Text.Font = GameFont.Small;
+                foreach (var tr in entry.ToolResults)
+                {
+                    string resultText = (tr.Success ? "[OK] " : "[FAIL] ") + tr.Content;
+                    if (tr.HasImage) resultText += " [+image]";
+                    GUI.color = tr.Success ? new Color(0.6f, 1f, 0.6f) : new Color(1f, 0.5f, 0.5f);
+                    float resH = Text.CalcHeight(resultText, textWidth);
+                    Widgets.Label(new Rect(textX, cy, textWidth, resH), resultText);
+                    cy += resH + 2f;
+                }
+                GUI.color = Color.white;
+                cy += 4f;
+            }
         }
     }
 }

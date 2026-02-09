@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using RimBot.Tools;
 
 namespace RimBot.Models
 {
@@ -28,9 +29,9 @@ namespace RimBot.Models
         {
             try
             {
-                var requestBody = BuildRequestBody(messages, maxTokens);
+                var requestBody = BuildRequestBody(messages, maxTokens, null);
 
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Content = new StringContent(requestBody.ToString(), Encoding.UTF8, "application/json");
 
@@ -40,14 +41,42 @@ namespace RimBot.Models
                 if (!response.IsSuccessStatusCode)
                 {
                     var flat = responseJson.Replace("\n", " ").Replace("\r", "");
-                    return ModelResponse.FromError($"Google API error ({response.StatusCode}): {flat}");
+                    return ModelResponse.FromError("Google API error (" + response.StatusCode + "): " + flat);
                 }
 
                 return ParseResponse(responseJson);
             }
             catch (Exception ex)
             {
-                return ModelResponse.FromError($"Google request failed: {ex.Message}");
+                return ModelResponse.FromError("Google request failed: " + ex.Message);
+            }
+        }
+
+        public async Task<ModelResponse> SendToolRequest(List<ChatMessage> messages, List<ToolDefinition> tools,
+            string model, string apiKey, int maxTokens)
+        {
+            try
+            {
+                var requestBody = BuildRequestBody(messages, maxTokens, tools);
+
+                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Content = new StringContent(requestBody.ToString(), Encoding.UTF8, "application/json");
+
+                var response = await Client.SendAsync(request);
+                var responseJson = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var flat = responseJson.Replace("\n", " ").Replace("\r", "");
+                    return ModelResponse.FromError("Google API error (" + response.StatusCode + "): " + flat);
+                }
+
+                return ParseToolResponse(responseJson);
+            }
+            catch (Exception ex)
+            {
+                return ModelResponse.FromError("Google tool request failed: " + ex.Message);
             }
         }
 
@@ -66,12 +95,12 @@ namespace RimBot.Models
 
                 // Image model may not support systemInstruction — fold system text into user content
                 var mergedMessages = FoldSystemIntoUser(messages);
-                var requestBody = BuildRequestBody(mergedMessages, imageMaxTokens);
+                var requestBody = BuildRequestBody(mergedMessages, imageMaxTokens, null);
 
                 var genConfig = (JObject)requestBody["generationConfig"];
                 genConfig["responseModalities"] = new JArray("TEXT", "IMAGE");
 
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{imageModel}:generateContent?key={apiKey}";
+                var url = "https://generativelanguage.googleapis.com/v1beta/models/" + imageModel + ":generateContent?key=" + apiKey;
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Content = new StringContent(requestBody.ToString(), Encoding.UTF8, "application/json");
 
@@ -81,14 +110,14 @@ namespace RimBot.Models
                 if (!response.IsSuccessStatusCode)
                 {
                     var flat = responseJson.Replace("\n", " ").Replace("\r", "");
-                    return ModelResponse.FromError($"Google API error ({response.StatusCode}): {flat}");
+                    return ModelResponse.FromError("Google API error (" + response.StatusCode + "): " + flat);
                 }
 
                 return ParseResponse(responseJson);
             }
             catch (Exception ex)
             {
-                return ModelResponse.FromError($"Google image request failed: {ex.Message}");
+                return ModelResponse.FromError("Google image request failed: " + ex.Message);
             }
         }
 
@@ -125,7 +154,7 @@ namespace RimBot.Models
             return result;
         }
 
-        private static JObject BuildRequestBody(List<ChatMessage> messages, int maxTokens)
+        private static JObject BuildRequestBody(List<ChatMessage> messages, int maxTokens, List<ToolDefinition> tools)
         {
             var systemMessages = messages.Where(m => m.Role == "system").ToList();
             var nonSystemMessages = messages.Where(m => m.Role != "system").ToList();
@@ -145,43 +174,97 @@ namespace RimBot.Models
                 };
             }
 
+            // Add tools if provided
+            if (tools != null && tools.Count > 0)
+            {
+                var funcDecls = new JArray();
+                foreach (var tool in tools)
+                {
+                    funcDecls.Add(new JObject
+                    {
+                        ["name"] = tool.Name,
+                        ["description"] = tool.Description,
+                        ["parameters"] = JObject.Parse(tool.ParametersJson)
+                    });
+                }
+                requestBody["tools"] = new JArray(new JObject
+                {
+                    ["functionDeclarations"] = funcDecls
+                });
+            }
+
             var contentsArray = new JArray();
             foreach (var msg in nonSystemMessages)
             {
                 var role = msg.Role == "assistant" ? "model" : msg.Role;
                 var partsArray = new JArray();
 
-                if (msg.HasImages)
+                foreach (var part in msg.ContentParts)
                 {
-                    foreach (var part in msg.ContentParts)
+                    // Skip Google thought parts — they're informational only, don't echo back
+                    if (part.Type == "thinking" && part.IsThought)
+                        continue;
+
+                    if (part.Type == "text" && !string.IsNullOrEmpty(part.Text))
                     {
-                        if (part.Type == "text")
+                        partsArray.Add(new JObject { ["text"] = part.Text });
+                    }
+                    else if (part.Type == "image_url")
+                    {
+                        partsArray.Add(new JObject
                         {
-                            partsArray.Add(new JObject { ["text"] = part.Text });
-                        }
-                        else if (part.Type == "image_url")
-                        {
-                            partsArray.Add(new JObject
+                            ["inline_data"] = new JObject
                             {
-                                ["inline_data"] = new JObject
-                                {
-                                    ["mime_type"] = part.MediaType,
-                                    ["data"] = part.Base64Data
-                                }
-                            });
+                                ["mime_type"] = part.MediaType,
+                                ["data"] = part.Base64Data
+                            }
+                        });
+                    }
+                    else if (part.Type == "tool_use")
+                    {
+                        var fcPart = new JObject
+                        {
+                            ["functionCall"] = new JObject
+                            {
+                                ["name"] = part.ToolName,
+                                ["args"] = part.ToolArguments ?? new JObject()
+                            }
+                        };
+                        // Gemini 3 requires thoughtSignature echoed back
+                        if (!string.IsNullOrEmpty(part.ThoughtSignature))
+                            fcPart["thoughtSignature"] = part.ThoughtSignature;
+                        partsArray.Add(fcPart);
+                    }
+                    else if (part.Type == "tool_result")
+                    {
+                        var responseObj = new JObject
+                        {
+                            ["content"] = part.Text ?? ""
+                        };
+                        // Add image data inline if present
+                        if (!string.IsNullOrEmpty(part.Base64Data))
+                        {
+                            responseObj["image_data"] = part.Base64Data;
                         }
+                        partsArray.Add(new JObject
+                        {
+                            ["functionResponse"] = new JObject
+                            {
+                                ["name"] = part.ToolName,
+                                ["response"] = responseObj
+                            }
+                        });
                     }
                 }
-                else
-                {
-                    partsArray.Add(new JObject { ["text"] = msg.Content });
-                }
 
-                contentsArray.Add(new JObject
+                if (partsArray.Count > 0)
                 {
-                    ["role"] = role,
-                    ["parts"] = partsArray
-                });
+                    contentsArray.Add(new JObject
+                    {
+                        ["role"] = role,
+                        ["parts"] = partsArray
+                    });
+                }
             }
             requestBody["contents"] = contentsArray;
 
@@ -197,7 +280,11 @@ namespace RimBot.Models
         {
             var parsed = JObject.Parse(responseJson);
             var parts = parsed["candidates"]?[0]?["content"]?["parts"] as JArray;
-            var tokensUsed = parsed["usageMetadata"]?["totalTokenCount"]?.Value<int>() ?? 0;
+            var usageMeta = parsed["usageMetadata"];
+            int inputTokens = usageMeta?["promptTokenCount"]?.Value<int>() ?? 0;
+            int outputTokens = usageMeta?["candidatesTokenCount"]?.Value<int>() ?? 0;
+            int cacheRead = usageMeta?["cachedContentTokenCount"]?.Value<int>() ?? 0;
+            int tokensUsed = usageMeta?["totalTokenCount"]?.Value<int>() ?? 0;
 
             string textContent = null;
             string imageBase64 = null;
@@ -226,7 +313,76 @@ namespace RimBot.Models
                 ImageBase64 = imageBase64,
                 ImageMediaType = imageMimeType,
                 RawJson = responseJson,
-                TokensUsed = tokensUsed
+                TokensUsed = tokensUsed,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                CacheReadTokens = cacheRead
+            };
+        }
+
+        private static ModelResponse ParseToolResponse(string responseJson)
+        {
+            var parsed = JObject.Parse(responseJson);
+            var parts = parsed["candidates"]?[0]?["content"]?["parts"] as JArray;
+            var usageMeta = parsed["usageMetadata"];
+            int inputTokens = usageMeta?["promptTokenCount"]?.Value<int>() ?? 0;
+            int outputTokens = usageMeta?["candidatesTokenCount"]?.Value<int>() ?? 0;
+            int cacheRead = usageMeta?["cachedContentTokenCount"]?.Value<int>() ?? 0;
+            int tokensUsed = usageMeta?["totalTokenCount"]?.Value<int>() ?? 0;
+
+            var assistantParts = new List<ContentPart>();
+            var toolCalls = new List<ToolCall>();
+            string textContent = null;
+
+            if (parts != null)
+            {
+                foreach (var part in parts)
+                {
+                    // Check for thought parts (Gemini 3 thinking)
+                    if (part["thought"]?.Value<bool>() == true && part["text"] != null)
+                    {
+                        var thoughtPart = ContentPart.FromThinking(null, part["text"].ToString());
+                        thoughtPart.IsThought = true;
+                        assistantParts.Add(thoughtPart);
+                    }
+                    else if (part["text"] != null)
+                    {
+                        var text = part["text"].ToString();
+                        assistantParts.Add(ContentPart.FromText(text));
+                        if (textContent == null)
+                            textContent = text;
+                    }
+                    else if (part["functionCall"] != null)
+                    {
+                        var fc = part["functionCall"];
+                        var name = fc["name"]?.ToString();
+                        var args = fc["args"] as JObject ?? new JObject();
+                        // Google doesn't use IDs, generate synthetic ones
+                        var id = "google_" + name + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+                        var contentPart = ContentPart.FromToolUse(id, name, args);
+                        // Capture thought signature for Gemini 3
+                        var thoughtSig = part["thoughtSignature"]?.ToString();
+                        if (!string.IsNullOrEmpty(thoughtSig))
+                            contentPart.ThoughtSignature = thoughtSig;
+                        assistantParts.Add(contentPart);
+                        toolCalls.Add(new ToolCall { Id = id, Name = name, Arguments = args });
+                    }
+                }
+            }
+
+            return new ModelResponse
+            {
+                Success = true,
+                Content = textContent,
+                RawJson = responseJson,
+                TokensUsed = tokensUsed,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                CacheReadTokens = cacheRead,
+                StopReason = toolCalls.Count > 0 ? StopReason.ToolUse : StopReason.EndTurn,
+                ToolCalls = toolCalls,
+                AssistantParts = assistantParts
             };
         }
     }
