@@ -15,7 +15,7 @@ namespace RimBot
         private static float lastCaptureTime;
         private static bool captureInProgress;
         private const float CaptureIntervalSeconds = 20f;
-        private const float MinAgentCooldownSeconds = 2f;
+        private const float AgentCooldownSeconds = 30f;
 
         public static Brain GetBrain(int pawnId)
         {
@@ -33,6 +33,17 @@ namespace RimBot
                     return pawn;
             }
             return null;
+        }
+
+        private static bool IsPawnIdleOrWandering(Pawn pawn)
+        {
+            var jobDef = pawn.CurJobDef;
+            if (jobDef == null)
+                return true;
+            return jobDef == JobDefOf.Wait
+                || jobDef == JobDefOf.Wait_Wander
+                || jobDef == JobDefOf.GotoWander
+                || jobDef == JobDefOf.Wait_MaintainPosture;
         }
 
         public static void EnqueueMainThread(Action action)
@@ -84,9 +95,16 @@ namespace RimBot
                     if (!brain.IsIdle || brain.IsPaused)
                         continue;
 
-                    float sinceLastRun = now - brain.LastRunStartedAt;
-                    if (sinceLastRun < MinAgentCooldownSeconds)
+                    var pawn = FindPawnById(kvp.Key);
+                    if (pawn == null || !pawn.Spawned)
                         continue;
+
+                    if (!IsPawnIdleOrWandering(pawn))
+                    {
+                        float sinceLastRun = now - brain.LastRunStartedAt;
+                        if (sinceLastRun < AgentCooldownSeconds)
+                            continue;
+                    }
 
                     brain.RunAgentLoop();
                 }
