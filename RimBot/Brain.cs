@@ -21,6 +21,7 @@ namespace RimBot
         public string Model { get; }
         public string ApiKey { get; }
         public MapSelectionMode PreferredMode { get; }
+        public string ProfileId { get; }
 
         private State state = State.Idle;
         private readonly List<HistoryEntry> history = new List<HistoryEntry>();
@@ -36,7 +37,7 @@ namespace RimBot
         private const float ErrorPauseSeconds = 30f;
         public IReadOnlyList<HistoryEntry> History => history;
 
-        public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, MapSelectionMode preferredMode)
+        public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, MapSelectionMode preferredMode, string profileId = null)
         {
             PawnId = pawnId;
             PawnLabel = label;
@@ -44,6 +45,13 @@ namespace RimBot
             Model = model;
             ApiKey = apiKey;
             PreferredMode = preferredMode;
+            ProfileId = profileId;
+        }
+
+        public void ClearConversation()
+        {
+            agentConversation = null;
+            history.Clear();
         }
 
         public void PauseFor(float seconds)

@@ -16,8 +16,6 @@ namespace RimBot
         private static bool captureInProgress;
         private const float CaptureIntervalSeconds = 20f;
         private const float MinAgentCooldownSeconds = 2f;
-        private static int nextAssignmentIndex;
-        private static bool extraColonistsSpawned;
 
         public static Brain GetBrain(int pawnId)
         {
@@ -61,14 +59,14 @@ namespace RimBot
             if (Find.CurrentMap == null)
                 return;
 
-            EnsureColonists();
+            SyncConfigColonists();
+            SyncBrains();
+
             SelectionTest.CheckAutoStart();
             ArchitectMode.CheckAutoStart();
-            SyncBrains();
 
             if (SelectionTest.IsRunning)
             {
-                // Legacy capture-first path for selection test
                 if (captureInProgress)
                     return;
                 if (Time.realtimeSinceStartup - lastCaptureTime < CaptureIntervalSeconds)
@@ -79,7 +77,6 @@ namespace RimBot
             }
             else
             {
-                // Agent mode: restart each brain as soon as it's idle (with minimum cooldown)
                 float now = Time.realtimeSinceStartup;
                 foreach (var kvp in brains)
                 {
@@ -96,36 +93,255 @@ namespace RimBot
             }
         }
 
-        private static void EnsureColonists()
+        private static int lastProfileCount = -1;
+
+        private static void SyncConfigColonists()
         {
-            if (extraColonistsSpawned)
+            var comp = Current.Game.GetComponent<ColonyAssignmentComponent>();
+            if (comp == null)
                 return;
-            extraColonistsSpawned = true;
 
             var settings = RimBotMod.Settings;
-            var assignments = GetFixedAssignments(settings);
-            int target = assignments.Count;
-            if (target == 0)
-                return;
+            settings.EnsureProfilesLoaded();
+            settings.AddDefaultProfilesIfEmpty();
 
-            var map = Find.CurrentMap;
-            var colonists = map.mapPawns.FreeColonistsSpawned;
-            int needed = target - colonists.Count;
-
-            if (needed <= 0)
-                return;
-
-            for (int i = 0; i < needed; i++)
+            // Count enabled profiles
+            var enabledProfiles = new List<AgentProfile>();
+            foreach (var p in settings.profiles)
             {
-                var request = new PawnGenerationRequest(
-                    PawnKindDefOf.Colonist,
-                    Faction.OfPlayer,
-                    PawnGenerationContext.PlayerStarter);
-                var pawn = PawnGenerator.GeneratePawn(request);
-                GenSpawn.Spawn(pawn, CellFinder.RandomClosewalkCellNear(map.Center, map, 5), map);
+                if (!string.IsNullOrEmpty(settings.GetApiKeyForProvider(p.Provider)))
+                    enabledProfiles.Add(p);
             }
 
-            Log.Message("[RimBot] Spawned " + needed + " extra colonists (total target: " + target + ").");
+            int target = enabledProfiles.Count;
+
+            // Detect dead config colonists — move from living to dead list
+            var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
+            var aliveIds = new HashSet<int>();
+            foreach (var pawn in colonists)
+                aliveIds.Add(pawn.thingIDNumber);
+
+            for (int i = comp.configPawnIds.Count - 1; i >= 0; i--)
+            {
+                int id = comp.configPawnIds[i];
+                if (!aliveIds.Contains(id))
+                {
+                    comp.MarkConfigPawnDead(id);
+                    ClearAssignment(comp, id);
+                    Log.Message("[RimBot] Config colonist " + id + " died, marked as dead.");
+                }
+            }
+
+            int deadConfig = comp.deadConfigPawnIds.Count;
+            var map = Find.CurrentMap;
+
+            // First run: claim existing scenario colonists as config pawns, adjust to target
+            if (comp.configPawnIds.Count == 0 && deadConfig == 0 && target > 0)
+            {
+                colonists = map.mapPawns.FreeColonistsSpawned;
+                int toClaim = Math.Min(colonists.Count, target);
+                for (int i = 0; i < toClaim; i++)
+                {
+                    comp.AddConfigPawn(colonists[i].thingIDNumber);
+                    Log.Message("[RimBot] Claimed scenario colonist " + colonists[i].LabelShort + " as config pawn");
+                }
+
+                // Remove excess scenario colonists
+                if (colonists.Count > target)
+                {
+                    for (int i = colonists.Count - 1; i >= target; i--)
+                    {
+                        Log.Message("[RimBot] Removing excess scenario colonist " + colonists[i].LabelShort);
+                        colonists[i].Destroy();
+                    }
+                }
+                // Spawn more if scenario didn't provide enough
+                else if (colonists.Count < target)
+                {
+                    int toSpawn = target - colonists.Count;
+                    for (int i = 0; i < toSpawn; i++)
+                    {
+                        var request = new PawnGenerationRequest(
+                            PawnKindDefOf.Colonist,
+                            Faction.OfPlayer,
+                            PawnGenerationContext.PlayerStarter);
+                        var pawn = PawnGenerator.GeneratePawn(request);
+                        GenSpawn.Spawn(pawn, CellFinder.RandomClosewalkCellNear(map.Center, map, 5), map);
+                        comp.AddConfigPawn(pawn.thingIDNumber);
+                        Log.Message("[RimBot] Spawned config colonist " + pawn.LabelShort);
+                    }
+                }
+            }
+
+            // Skip if profile count hasn't changed and we already have the right number
+            int livingConfig = comp.configPawnIds.Count;
+            if (target == lastProfileCount && livingConfig + deadConfig == target)
+                return;
+            lastProfileCount = target;
+
+            // Slots available = target minus dead config pawns (dead ones stay dead)
+            int slotsAvailable = target - deadConfig;
+            if (slotsAvailable < 0)
+                slotsAvailable = 0;
+
+            // Spawn more config colonists if needed
+            if (livingConfig < slotsAvailable)
+            {
+                int toSpawn = slotsAvailable - livingConfig;
+                for (int i = 0; i < toSpawn; i++)
+                {
+                    var request = new PawnGenerationRequest(
+                        PawnKindDefOf.Colonist,
+                        Faction.OfPlayer,
+                        PawnGenerationContext.PlayerStarter);
+                    var pawn = PawnGenerator.GeneratePawn(request);
+                    GenSpawn.Spawn(pawn, CellFinder.RandomClosewalkCellNear(map.Center, map, 5), map);
+                    comp.AddConfigPawn(pawn.thingIDNumber);
+                    Log.Message("[RimBot] Spawned config colonist " + pawn.LabelShort + " (id=" + pawn.thingIDNumber + ")");
+                }
+            }
+            // Remove excess config colonists if profiles were reduced
+            else if (livingConfig > slotsAvailable)
+            {
+                int toRemove = livingConfig - slotsAvailable;
+                for (int i = 0; i < toRemove; i++)
+                {
+                    int removeId = comp.configPawnIds[comp.configPawnIds.Count - 1];
+                    var pawn = FindPawnById(removeId);
+                    if (pawn != null)
+                    {
+                        Log.Message("[RimBot] Removing config colonist " + pawn.LabelShort + " (profile removed)");
+                        ClearAssignment(comp, removeId);
+                        comp.RemoveConfigPawn(removeId);
+                        pawn.Destroy();
+                    }
+                    else
+                    {
+                        comp.RemoveConfigPawn(removeId);
+                    }
+                }
+            }
+
+            // Auto-assign all config colonists to profiles
+            var livingConfigPawns = new List<int>(comp.configPawnIds);
+            for (int i = 0; i < livingConfigPawns.Count && i < enabledProfiles.Count; i++)
+            {
+                comp.SetAssignment(livingConfigPawns[i], enabledProfiles[i].Id);
+            }
+        }
+
+        private static void ClearAssignment(ColonyAssignmentComponent comp, int pawnId)
+        {
+            comp.ClearAssignment(pawnId);
+            if (brains.ContainsKey(pawnId))
+            {
+                Log.Message("[RimBot] Removed brain for pawn " + pawnId);
+                brains.Remove(pawnId);
+            }
+        }
+
+        private static void SyncBrains()
+        {
+            var settings = RimBotMod.Settings;
+            settings.EnsureProfilesLoaded();
+            settings.AddDefaultProfilesIfEmpty();
+
+            var comp = Current.Game.GetComponent<ColonyAssignmentComponent>();
+            if (comp == null)
+                return;
+
+            var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
+            var currentIds = new HashSet<int>();
+            foreach (var pawn in colonists)
+                currentIds.Add(pawn.thingIDNumber);
+
+            // Remove brains for dead/gone pawns and clear their assignments
+            var toRemove = new List<int>();
+            foreach (var id in brains.Keys)
+            {
+                if (!currentIds.Contains(id))
+                    toRemove.Add(id);
+            }
+            foreach (var id in toRemove)
+            {
+                Log.Message("[RimBot] Removed brain for pawn " + id);
+                brains.Remove(id);
+                comp.ClearAssignment(id);
+            }
+
+            // Get enabled profiles (those with API keys)
+            var enabledProfiles = new List<AgentProfile>();
+            foreach (var p in settings.profiles)
+            {
+                if (!string.IsNullOrEmpty(settings.GetApiKeyForProvider(p.Provider)))
+                    enabledProfiles.Add(p);
+            }
+
+            foreach (var pawn in colonists)
+            {
+                int pawnId = pawn.thingIDNumber;
+                string profileId = comp.GetAssignment(pawnId);
+
+                // Auto-assign new colonists if enabled
+                if (string.IsNullOrEmpty(profileId) && comp.autoAssignNewColonists && enabledProfiles.Count > 0)
+                {
+                    comp.AutoAssign(pawnId, enabledProfiles);
+                    profileId = comp.GetAssignment(pawnId);
+                }
+
+                if (string.IsNullOrEmpty(profileId))
+                {
+                    // No assignment — remove brain if it exists
+                    if (brains.ContainsKey(pawnId))
+                    {
+                        Log.Message("[RimBot] Removed brain for " + pawn.LabelShort + " (unassigned)");
+                        brains.Remove(pawnId);
+                    }
+                    continue;
+                }
+
+                var profile = settings.GetProfileById(profileId);
+                if (profile == null)
+                {
+                    // Profile was deleted — remove brain and clear assignment
+                    if (brains.ContainsKey(pawnId))
+                    {
+                        Log.Message("[RimBot] Removed brain for " + pawn.LabelShort + " (profile deleted)");
+                        brains.Remove(pawnId);
+                    }
+                    comp.ClearAssignment(pawnId);
+                    continue;
+                }
+
+                string apiKey = settings.GetApiKeyForProvider(profile.Provider);
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    // No API key for this provider — remove brain
+                    if (brains.ContainsKey(pawnId))
+                    {
+                        Log.Message("[RimBot] Removed brain for " + pawn.LabelShort + " (no API key for " + profile.Provider + ")");
+                        brains.Remove(pawnId);
+                    }
+                    continue;
+                }
+
+                Brain existing;
+                if (brains.TryGetValue(pawnId, out existing))
+                {
+                    // Check if profile changed (different profile or model changed)
+                    if (existing.ProfileId == profileId && existing.Model == profile.Model)
+                        continue;
+
+                    Log.Message("[RimBot] Recreating brain for " + pawn.LabelShort + " (profile/model changed)");
+                    brains.Remove(pawnId);
+                }
+
+                var brain = new Brain(pawnId, pawn.LabelShort,
+                    profile.Provider, profile.Model, apiKey, MapSelectionMode.Coordinates, profileId);
+                brains[pawnId] = brain;
+                Log.Message("[RimBot] Created brain for " + pawn.LabelShort
+                    + " (" + profile.Provider + ", " + profile.Model + ")");
+            }
         }
 
         private static void CaptureAll()
@@ -175,96 +391,6 @@ namespace RimBot
                 }
                 captureInProgress = false;
             });
-        }
-
-        private static List<ProviderAssignment> GetFixedAssignments(RimBotSettings settings)
-        {
-            var result = new List<ProviderAssignment>();
-
-            if (!string.IsNullOrEmpty(settings.anthropicApiKey))
-            {
-                result.Add(new ProviderAssignment
-                {
-                    Provider = LLMProviderType.Anthropic,
-                    Model = "claude-haiku-4-5-20251001",
-                    ApiKey = settings.anthropicApiKey,
-                    Mode = MapSelectionMode.Coordinates
-                });
-            }
-
-            if (!string.IsNullOrEmpty(settings.googleApiKey))
-            {
-                result.Add(new ProviderAssignment
-                {
-                    Provider = LLMProviderType.Google,
-                    Model = "gemini-3-flash-preview",
-                    ApiKey = settings.googleApiKey,
-                    Mode = MapSelectionMode.Coordinates
-                });
-            }
-
-            if (!string.IsNullOrEmpty(settings.openAIApiKey))
-            {
-                result.Add(new ProviderAssignment
-                {
-                    Provider = LLMProviderType.OpenAI,
-                    Model = "gpt-5-mini",
-                    ApiKey = settings.openAIApiKey,
-                    Mode = MapSelectionMode.Coordinates
-                });
-            }
-
-            return result;
-        }
-
-        private struct ProviderAssignment
-        {
-            public LLMProviderType Provider;
-            public string Model;
-            public string ApiKey;
-            public MapSelectionMode Mode;
-        }
-
-        private static void SyncBrains()
-        {
-            var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
-            var currentIds = new HashSet<int>();
-
-            foreach (var pawn in colonists)
-                currentIds.Add(pawn.thingIDNumber);
-
-            // Remove brains for colonists no longer present
-            var toRemove = new List<int>();
-            foreach (var id in brains.Keys)
-            {
-                if (!currentIds.Contains(id))
-                    toRemove.Add(id);
-            }
-            foreach (var id in toRemove)
-            {
-                Log.Message("[RimBot] Removed brain for pawn " + id);
-                brains.Remove(id);
-            }
-
-            // Assign fixed provider+mode combos to colonists
-            var settings = RimBotMod.Settings;
-            var assignments = GetFixedAssignments(settings);
-            if (assignments.Count == 0)
-                return;
-
-            foreach (var pawn in colonists)
-            {
-                if (!brains.ContainsKey(pawn.thingIDNumber))
-                {
-                    var a = assignments[nextAssignmentIndex % assignments.Count];
-                    nextAssignmentIndex++;
-                    var brain = new Brain(pawn.thingIDNumber, pawn.LabelShort,
-                        a.Provider, a.Model, a.ApiKey, a.Mode);
-                    brains[pawn.thingIDNumber] = brain;
-                    Log.Message("[RimBot] Created brain for " + pawn.LabelShort
-                        + " (" + a.Provider + ", " + a.Model + ", " + a.Mode + ")");
-                }
-            }
         }
     }
 }
