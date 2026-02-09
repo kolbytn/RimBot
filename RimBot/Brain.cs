@@ -100,9 +100,11 @@ namespace RimBot
                 var sysPrompt = "You are the brain of a RimWorld colonist named " + label + ". Play RimWorld. " +
                     "You have tools to observe and interact with the world. Use get_screenshot to see " +
                     "your surroundings, inspect_cell and scan_area to examine locations in detail, " +
-                    "find_on_map to locate resources, get_pawn_status to check colonist status, " +
-                    "architect_structure to place blueprints (walls, doors, beds, tables, campfires, and more), " +
-                    "and designate to order harvesting, mining, hauling, hunting, and deconstruction. " +
+                    "find_on_map to locate resources, get_pawn_status to check colonist status. " +
+                    "Use architect_* tools to build (structure, production, furniture, power, security, " +
+                    "misc, floors, ship, temperature, joy) — call list_buildables first to see available items. " +
+                    "Use architect_orders for mining, harvesting, hauling, hunting, deconstructing, and more. " +
+                    "Use architect_zone for stockpiles, growing zones, and area management. " +
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
                     "Build rooms, expand the colony, and make decisions as you see fit.";
 
@@ -129,8 +131,7 @@ namespace RimBot
 
             var messages = new List<ChatMessage>(agentConversation);
 
-            // Set up tool registry based on placement mode
-            ToolRegistry.EnsureInitialized(RimBotMod.Settings.placementMode);
+            ToolRegistry.EnsureInitialized();
             var tools = ToolRegistry.GetAllDefinitions();
 
             var toolContext = new ToolContext

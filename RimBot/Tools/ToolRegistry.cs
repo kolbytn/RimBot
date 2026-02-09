@@ -5,23 +5,28 @@ namespace RimBot.Tools
     public static class ToolRegistry
     {
         private static readonly Dictionary<string, ITool> tools = new Dictionary<string, ITool>();
-        private static PlacementMode? lastMode;
+        private static bool initialized;
 
-        public static void EnsureInitialized(PlacementMode mode)
+        public static void EnsureInitialized()
         {
-            if (lastMode.HasValue && lastMode.Value == mode)
+            if (initialized)
                 return;
 
-            tools.Clear();
-            lastMode = mode;
+            initialized = true;
 
             Register(new GetScreenshotTool());
-            Register(new ArchitectStructureTool());
+            Register(new ArchitectOrdersTool());
+            Register(new ArchitectZoneTool());
+            Register(new ListBuildablesTool());
+
+            foreach (var cat in new[] { "Structure", "Production", "Furniture", "Power",
+                "Security", "Misc", "Floors", "Ship", "Temperature", "Joy" })
+                Register(new ArchitectBuildTool(cat));
+
             Register(new InspectCellTool());
             Register(new ScanAreaTool());
             Register(new FindOnMapTool());
             Register(new GetPawnStatusTool());
-            Register(new DesignateTool());
         }
 
         private static void Register(ITool tool)
