@@ -65,6 +65,10 @@ Use this procedure to verify changes whenever you want to test, or when asked to
 - `[RimBot] [<name>] Vision: <text>` — vision mode full round-trip success
 - `[RimBot] Area capture failed:` — rendering pipeline errors
 
+### Adding debug logging
+
+Feel free to add temporary `Log.Message("[RimBot] ...")` statements anywhere in the code to help diagnose issues during testing. Just make sure to remove all temporary logging statements after you're done — only permanent, intentional log lines should be committed.
+
 ## Architecture
 
 ### Entry Point & Tick Loop
@@ -75,8 +79,8 @@ Use this procedure to verify changes whenever you want to test, or when asked to
 
 ### Brain System
 
-- **`BrainManager.cs`** — Static manager. `Tick()` syncs brains with colonists (creates/removes based on profile assignments), triggers agent loops for idle brains. Key constants: 20s capture interval, 30s agent cooldown. Uses `ConcurrentQueue<Action>` for background-to-main-thread dispatch.
-- **`Brain.cs`** — Per-colonist agent. Maintains conversation history (auto-trimmed at 40 messages to 24), up to 50 history entries. `RunAgentLoop()` builds context, spawns async Task to call `AgentRunner.RunAgent()`. Records each turn to history in real-time via callback. Also has `SendToLLM()` (vision mode) and `GenerateMapSelection()` (benchmark mode).
+- **`BrainManager.cs`** — Static manager. `Tick()` syncs brains with colonists (creates/removes based on profile assignments), triggers agent loops for idle brains. Key constant: 30s agent cooldown. Uses `ConcurrentQueue<Action>` for background-to-main-thread dispatch.
+- **`Brain.cs`** — Per-colonist agent. Maintains conversation history (auto-trimmed at 40 messages to 24), up to 50 history entries. `RunAgentLoop()` builds context, spawns async Task to call `AgentRunner.RunAgent()`. Records each turn to history in real-time via callback. Also has `SendToLLM()` (vision mode) and `GenerateArchitectPlan()` (architect mode).
 - **`AgentRunner.cs`** — Stateless agentic loop. Calls LLM, executes tool calls on main thread via `TaskCompletionSource` bridge, loops up to 10 iterations. Discards max-token responses with no tool calls to prevent runaway outputs. Fires `onTurnComplete` callback after each iteration.
 - **`AgentProfile.cs`** — Data model: GUID + provider + model string.
 - **`ColonyAssignmentComponent.cs`** — `GameComponent` mapping pawn IDs to profile IDs. Handles round-robin auto-assignment and config-spawned colonist tracking.
@@ -125,10 +129,9 @@ Key gotcha: `Camera.Render()` produces black images if map section meshes haven'
 
 LLM network calls run on background threads via `Task.Run`. All Unity/RimWorld API access (tool execution, UI updates, history recording) must happen on the main thread. `BrainManager.EnqueueMainThread()` uses a `ConcurrentQueue<Action>` drained every tick by `TickManagerPatch`.
 
-### Debugging/Benchmarking
+### Debugging
 
 - **`LLMTestUtility.cs`** — Sends a one-off test message to verify API connectivity.
-- **`SelectionTest.cs`** / **`SelectionTestWindow.cs`** — Automated accuracy benchmarking for map selection (coordinates vs. mask modes).
 - **`ArchitectMode.cs`** — Test mode for architect-style LLM-guided building placement.
 
 ## Dependencies

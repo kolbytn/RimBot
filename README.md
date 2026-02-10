@@ -21,30 +21,66 @@ Supports **Anthropic (Claude)**, **OpenAI (GPT)**, and **Google (Gemini)** as LL
 
 See [Development Setup](#development-setup) below.
 
-## Configuration
+## In-Game Usage
+
+### Initial Setup
 
 1. In RimWorld, go to **Options > Mod Settings > RimBot**
 2. Enter at least one API key (Anthropic, OpenAI, or Google)
 3. **Agent Profiles** will auto-populate with a default profile per configured provider. Each profile specifies a provider + model combination. You can add, remove, or customize profiles.
-4. Start a game — colonists are automatically assigned to profiles in round-robin order
+4. Start a game — colonists are automatically assigned to profiles in round-robin order. The mod spawns one colonist per profile.
 
-### Settings
+### Settings Panel
+
+Open the settings panel from **Options > Mod Settings > RimBot**. Available settings:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| API Keys | — | Keys for Anthropic, OpenAI, and/or Google |
-| Agent Profiles | Auto-created | Provider + model pairs assigned to colonists |
-| Auto-assign new colonists | On | Automatically assign newly arrived colonists to profiles |
-| Max Tokens | 1024 | Maximum response tokens per LLM call |
-| Thinking Budget | 2048 | Extended thinking token budget (0 to disable) |
+| API Keys | — | Enter keys for Anthropic, OpenAI, and/or Google. Only providers with keys will be available for profiles. |
+| Agent Profiles | Auto-created | Each profile is a provider + model pair. Click the provider button to switch providers, and the model button to pick a model. Use "X" to remove a profile and "+ Add Profile" to create one. |
+| Auto-assign new colonists | On | When enabled, newly arrived colonists are automatically assigned to profiles in round-robin order. Only visible during an active game. |
+| Max Tokens | 1024 | Maximum response tokens per LLM call (64–4096). Higher values let the LLM give longer responses but cost more. |
+| Thinking Budget | 2048 | Extended thinking token budget (0–8192, increments of 256). Set to 0 to disable extended thinking. Higher values give the LLM more reasoning capacity. |
+| Send Test Message | — | Debug button to verify API connectivity. Check the game log for results. |
 
-### In-Game UI
+### Colonist Inspector Tab
 
-Select any colonist and open the **RimBot** tab in the inspector panel to:
-- View the agent's conversation history with expandable entries showing screenshots, tool calls, tool results, and thinking
-- Change the colonist's assigned profile or unassign them
-- See brain status (Running / Idle / Paused)
-- Clear the conversation to start fresh
+Select any colonist and open the **RimBot** tab in the bottom-left inspector panel. It has two sub-tabs:
+
+**Settings sub-tab:**
+- **Profile Assignment** — Dropdown to assign this colonist to a specific agent profile, or set to "Unassigned" to disable their brain
+- **Brain Status** — Shows current state: None (no profile), Running (LLM call in progress), Idle (waiting for next cycle), or Paused (cooling down after error)
+- **Clear Conversation** — Resets the colonist's conversation history and starts fresh
+
+**History sub-tab:**
+- Shows a scrollable list of all LLM interactions for this colonist, newest first
+- Each entry displays: game time (Day/Hour), mode (Agent), iteration number, provider/model, and success/failure status
+- **Click any entry to expand it** and see full details:
+  - Token usage (input, output, cache read, reasoning)
+  - Screenshot thumbnail (if the turn included a `get_screenshot` call)
+  - System prompt (first iteration only)
+  - Extended thinking text (toggle visibility with the "Show Thinking" / "Hide Thinking" button)
+  - Response text (green = success, red = failure)
+  - Tool calls with argument JSON
+  - Tool results with success/failure and content
+- History updates live as each agent iteration completes — you can watch the colonist think and act in real time
+
+### Viewing Logs
+
+All mod activity is logged with the `[RimBot]` prefix. To view logs:
+
+1. Open RimWorld's dev console (toggle with `` ` `` key if dev mode is enabled), or
+2. Read the log file directly at:
+   - **Windows:** `%APPDATA%\..\LocalLow\Ludeon Studios\RimWorld by Ludeon Studios\Player.log`
+   - **Linux:** `~/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Player.log`
+   - **macOS:** `~/Library/Logs/Unity/Player.log`
+
+Key log patterns:
+- `[RimBot] Created brain for <name>` — Colonist detected and brain initialized
+- `[RimBot] [AGENT] [<name>] Starting agent loop...` — Agent cycle beginning
+- `[RimBot] [AGENT] [<name>] Completed in N iterations` — Agent cycle finished
+- `[RimBot] [AGENT] [<name>] Failed:` — Error occurred (rate limit, API issue, etc.)
+- `[RimBot] [AGENT] [<name>] Pausing for 30s` — Auto-pause after rate limit error
 
 ## How It Works
 
@@ -103,8 +139,6 @@ RimBot/
   HistoryEntry.cs          Data model for LLM interaction records
   ITab_RimBotHistory.cs    Inspector tab UI for viewing agent history
   LLMTestUtility.cs        Debug test message utility
-  SelectionTest.cs         Map selection accuracy benchmarking
-  SelectionTestWindow.cs   UI for selection test results
   ArchitectMode.cs         Architect placement mode
 
   Models/

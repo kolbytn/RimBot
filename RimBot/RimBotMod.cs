@@ -178,16 +178,6 @@ namespace RimBot
                 LLMTestUtility.SendTestMessage();
             }
 
-            if (listing.ButtonText(SelectionTest.IsRunning ? "Stop Selection Test" : "Run Selection Test"))
-            {
-                SelectionTest.Toggle();
-            }
-
-            if (listing.ButtonText("View Selection Test Results"))
-            {
-                Find.WindowStack.Add(new SelectionTestWindow());
-            }
-
             if (listing.ButtonText(ArchitectMode.IsRunning ? "Stop Architect Mode" : "Start Architect Mode"))
             {
                 ArchitectMode.Toggle();

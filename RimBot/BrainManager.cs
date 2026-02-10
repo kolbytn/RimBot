@@ -12,9 +12,6 @@ namespace RimBot
     {
         private static readonly Dictionary<int, Brain> brains = new Dictionary<int, Brain>();
         private static readonly ConcurrentQueue<Action> mainThreadQueue = new ConcurrentQueue<Action>();
-        private static float lastCaptureTime;
-        private static bool captureInProgress;
-        private const float CaptureIntervalSeconds = 20f;
         private const float AgentCooldownSeconds = 30f;
 
         public static Brain GetBrain(int pawnId)
@@ -73,41 +70,27 @@ namespace RimBot
             SyncConfigColonists();
             SyncBrains();
 
-            SelectionTest.CheckAutoStart();
             ArchitectMode.CheckAutoStart();
 
-            if (SelectionTest.IsRunning)
+            float now = Time.realtimeSinceStartup;
+            foreach (var kvp in brains)
             {
-                if (captureInProgress)
-                    return;
-                if (Time.realtimeSinceStartup - lastCaptureTime < CaptureIntervalSeconds)
-                    return;
+                var brain = kvp.Value;
+                if (!brain.IsIdle || brain.IsPaused)
+                    continue;
 
-                lastCaptureTime = Time.realtimeSinceStartup;
-                CaptureAll();
-            }
-            else
-            {
-                float now = Time.realtimeSinceStartup;
-                foreach (var kvp in brains)
+                var pawn = FindPawnById(kvp.Key);
+                if (pawn == null || !pawn.Spawned)
+                    continue;
+
+                if (!IsPawnIdleOrWandering(pawn))
                 {
-                    var brain = kvp.Value;
-                    if (!brain.IsIdle || brain.IsPaused)
+                    float sinceLastRun = now - brain.LastRunStartedAt;
+                    if (sinceLastRun < AgentCooldownSeconds)
                         continue;
-
-                    var pawn = FindPawnById(kvp.Key);
-                    if (pawn == null || !pawn.Spawned)
-                        continue;
-
-                    if (!IsPawnIdleOrWandering(pawn))
-                    {
-                        float sinceLastRun = now - brain.LastRunStartedAt;
-                        if (sinceLastRun < AgentCooldownSeconds)
-                            continue;
-                    }
-
-                    brain.RunAgentLoop();
                 }
+
+                brain.RunAgentLoop();
             }
         }
 
@@ -355,60 +338,12 @@ namespace RimBot
                 }
 
                 var brain = new Brain(pawnId, pawn.LabelShort,
-                    profile.Provider, profile.Model, apiKey, MapSelectionMode.Coordinates, profileId);
+                    profile.Provider, profile.Model, apiKey, profileId);
                 brains[pawnId] = brain;
                 Log.Message("[RimBot] Created brain for " + pawn.LabelShort
                     + " (" + profile.Provider + ", " + profile.Model + ")");
             }
         }
 
-        private static void CaptureAll()
-        {
-            var requests = new List<ScreenshotCapture.CaptureRequest>();
-            var brainOrder = new List<Brain>();
-            var pawnOrder = new List<Pawn>();
-
-            foreach (var kvp in brains)
-            {
-                var pawn = FindPawnById(kvp.Key);
-                if (pawn == null || !pawn.Spawned)
-                    continue;
-                if (!kvp.Value.IsIdle)
-                    continue;
-
-                requests.Add(new ScreenshotCapture.CaptureRequest
-                {
-                    CenterCell = pawn.Position,
-                    CameraSize = 24f,
-                    PixelSize = 512
-                });
-                brainOrder.Add(kvp.Value);
-                pawnOrder.Add(pawn);
-            }
-
-            if (requests.Count == 0)
-                return;
-
-            captureInProgress = true;
-            ScreenshotCapture.StartBatchCapture(requests, results =>
-            {
-                if (SelectionTest.IsRunning)
-                {
-                    Log.Message("[RimBot] Selection test cycle: capturing " + brainOrder.Count + " brains");
-                    SelectionTest.ProcessCapture(brainOrder, pawnOrder, results);
-                }
-                else if (ArchitectMode.IsRunning)
-                {
-                    Log.Message("[RimBot] Architect mode cycle: " + brainOrder.Count + " brains");
-                    ArchitectMode.ProcessCapture(brainOrder, pawnOrder, results);
-                }
-                else
-                {
-                    for (int i = 0; i < brainOrder.Count; i++)
-                        brainOrder[i].SendToLLM(results[i]);
-                }
-                captureInProgress = false;
-            });
-        }
     }
 }

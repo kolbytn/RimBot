@@ -94,7 +94,6 @@
     <Compile Include="Brain.cs" />
     <Compile Include="BrainManager.cs" />
     <Compile Include="ScreenshotCapture.cs" />
-    <Compile Include="SelectionTest.cs" />
     <Compile Include="ArchitectMode.cs" />
     <Compile Include="AgentRunner.cs" />
     <Compile Include="Tools\ToolTypes.cs" />
@@ -120,7 +119,6 @@
     <Compile Include="Tools\SetWildlifeOperationTool.cs" />
     <Compile Include="Tools\ListResearchTool.cs" />
     <Compile Include="Tools\SetResearchTool.cs" />
-    <Compile Include="SelectionTestWindow.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
