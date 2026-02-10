@@ -69,6 +69,21 @@ Use this procedure to verify changes whenever you want to test, or when asked to
 
 Feel free to add temporary `Log.Message("[RimBot] ...")` statements anywhere in the code to help diagnose issues during testing. Just make sure to remove all temporary logging statements after you're done — only permanent, intentional log lines should be committed.
 
+### Overriding AI config for testing
+
+Mod settings persist across game launches in:
+```
+%APPDATA%\..\LocalLow\Ludeon Studios\RimWorld by Ludeon Studios\Config\Mod_RimBot_RimBotMod.xml
+```
+
+This file stores API keys, max tokens, and serialized profiles. Profile format is pipe-delimited: `id|providerInt|model|thinkingLevel`, separated by `;;`. Provider ints: 0=Anthropic, 1=OpenAI, 2=Google. Thinking levels: 0=None, 1=Low, 2=Medium, 3=High.
+
+To temporarily override config for testing:
+- **Edit the XML directly** while RimWorld is not running. Changes take effect on next launch. Useful for swapping models, adjusting thinking levels, or testing with different API keys without navigating the in-game UI.
+- **Via in-game UI**: Esc → Options → Mod Settings → RimBot for API keys and max tokens. Per-colonist profile and thinking level are on the colonist's RimBot ITab → Settings sub-tab.
+- **To test a specific provider**: remove other API keys from the XML so only the target provider has a key. `AddDefaultProfilesIfEmpty()` auto-creates a profile for each provider with a key on first load.
+- **To reset config**: delete the XML file. RimWorld will recreate it with defaults on next launch.
+
 ## Architecture
 
 ### Entry Point & Tick Loop
@@ -82,14 +97,14 @@ Feel free to add temporary `Log.Message("[RimBot] ...")` statements anywhere in 
 - **`BrainManager.cs`** — Static manager. `Tick()` syncs brains with colonists (creates/removes based on profile assignments), triggers agent loops for idle brains. Key constant: 30s agent cooldown. Uses `ConcurrentQueue<Action>` for background-to-main-thread dispatch.
 - **`Brain.cs`** — Per-colonist agent. Maintains conversation history (auto-trimmed at 40 messages to 24), up to 50 history entries. `RunAgentLoop()` builds context, spawns async Task to call `AgentRunner.RunAgent()`. Records each turn to history in real-time via callback.
 - **`AgentRunner.cs`** — Stateless agentic loop. Calls LLM, executes tool calls on main thread via `TaskCompletionSource` bridge, loops up to 10 iterations. Discards max-token responses with no tool calls to prevent runaway outputs. Fires `onTurnComplete` callback after each iteration.
-- **`AgentProfile.cs`** — Data model: GUID + provider + model string.
+- **`AgentProfile.cs`** — Data model: GUID + provider + model string + thinking level.
 - **`ColonyAssignmentComponent.cs`** — `GameComponent` mapping pawn IDs to profile IDs. Handles round-robin auto-assignment and config-spawned colonist tracking.
 
 ### LLM Providers
 
 - **`Models/ILanguageModel.cs`** — Interface: `SendChatRequest`, `SendToolRequest`, `SendImageRequest`, `GetAvailableModels`, `SupportsImageOutput`.
 - **`Models/AnthropicModel.cs`** — Claude API. Supports extended thinking via `interleaved-thinking` beta header. Models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`.
-- **`Models/OpenAIModel.cs`** — GPT API. Maps thinking budget to reasoning effort levels. Supports image output. Models: `gpt-5-mini`, `gpt-5.2`.
+- **`Models/OpenAIModel.cs`** — GPT API. Uses Responses API (`/v1/responses`) for tool calls with `reasoning.summary` support; Chat Completions for simple chat. Supports image output. Models: `gpt-5-mini`, `gpt-5.2`.
 - **`Models/GoogleModel.cs`** — Gemini API. Uses `functionDeclarations`, `systemInstruction`, `thinkingConfig`. Generates synthetic tool call IDs. Models: `gemini-3-flash-preview`, `gemini-3-pro-preview`.
 - **`Models/LLMModelFactory.cs`** — Singleton cache of provider instances.
 - **`Models/ChatMessage.cs`** / **`ContentPart.cs`** — Multi-modal message types supporting text, images, tool_use, tool_result, and thinking parts with provider-specific fields (signatures, redacted thinking, thought markers).
@@ -120,9 +135,9 @@ Key gotcha: `Camera.Render()` produces black images if map section meshes haven'
 
 ### Settings & UI
 
-- **`RimBotSettings.cs`** — `ModSettings` subclass. Persists API keys, max tokens, thinking budget, and serialized profiles via `Scribe_Values`. Profiles serialized as pipe-delimited strings.
-- **`RimBotMod.cs`** — Settings UI: API key fields, profile management (add/remove, provider/model dropdowns), auto-assign toggle, token sliders, debug buttons.
-- **`ITab_RimBotHistory.cs`** — Inspector tab on colonists. Two sub-tabs: History (scrollable entries with screenshots, tool calls, thinking, tokens) and Settings (profile assignment, brain status, clear conversation).
+- **`RimBotSettings.cs`** — `ModSettings` subclass. Persists API keys, max tokens, and serialized profiles via `Scribe_Values`. Profiles serialized as pipe-delimited strings (`id|provider|model|thinkingLevel`).
+- **`RimBotMod.cs`** — Settings UI: API key fields, profile management (add/remove, provider/model dropdowns), auto-assign toggle, max tokens slider.
+- **`ITab_RimBotHistory.cs`** — Inspector tab on colonists. Two sub-tabs: History (scrollable entries with screenshots, tool calls, thinking, tokens) and Settings (profile assignment, thinking level dropdown, brain status, clear conversation).
 - **`HistoryEntry.cs`** — Data model for each LLM interaction. Lazy-loads `Texture2D` from base64 on first access, with explicit `DisposeTexture()` for GPU memory cleanup.
 
 ### Threading Model
