@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -18,10 +21,10 @@ jobs:
 
       - name: Download RimWorld reference assemblies
         run: |
-          dotnet new tool-manifest --force
-          dotnet tool install NuGet.CommandLine --version 6.* --tool-path ./tools
-          ./tools/nuget install Krafs.Rimworld.Ref -Version 1.6.4633 -OutputDirectory ./packages
-          echo "RIMWORLD_MANAGED=$(pwd)/packages/Krafs.Rimworld.Ref.1.6.4633/ref/net472" >> $GITHUB_ENV
+          curl -sL "https://www.nuget.org/api/v2/package/Krafs.Rimworld.Ref/1.6.4633" -o krafs.nupkg
+          mkdir -p packages/Krafs.Rimworld.Ref
+          unzip -o krafs.nupkg -d packages/Krafs.Rimworld.Ref
+          echo "RIMWORLD_MANAGED=$(pwd)/packages/Krafs.Rimworld.Ref/ref/net472" >> $GITHUB_ENV
 
       - name: Build
         run: dotnet build RimBot.slnx -c Release -p:RimWorldManagedPath="$RIMWORLD_MANAGED" -p:CI=true
