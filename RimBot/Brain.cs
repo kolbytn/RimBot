@@ -27,7 +27,8 @@ namespace RimBot
         private readonly List<HistoryEntry> history = new List<HistoryEntry>();
         private const int MaxHistoryEntries = 50;
         private List<ChatMessage> agentConversation;
-        private const int MaxConversationMessages = 30;
+        private const int ConversationTrimThreshold = 40;
+        private const int ConversationTrimTarget = 24;
         private float lastRunStartedAt = float.MinValue;
         private float pauseUntil;
 
@@ -132,6 +133,15 @@ namespace RimBot
                 // Trim conversation if too long — keep system + first user + last N messages
                 TrimConversation();
 
+                // After max iterations the conversation ends with user(tool_results).
+                // Insert a synthetic assistant message to prevent consecutive user messages
+                // which violates Google's alternating role requirement and causes hallucinated tool calls.
+                if (agentConversation.Count > 0 && agentConversation[agentConversation.Count - 1].Role == "user")
+                {
+                    agentConversation.Add(new ChatMessage("assistant",
+                        "I've used all my actions for this cycle. I'll reassess the situation next cycle."));
+                }
+
                 agentConversation.Add(new ChatMessage("user",
                     "Continue. " + elapsedSeconds + " seconds have passed. You are currently " +
                     currentActivity + ". Take a screenshot to see your surroundings and decide what to do next."));
@@ -213,24 +223,23 @@ namespace RimBot
 
         private void TrimConversation()
         {
-            if (agentConversation == null || agentConversation.Count <= MaxConversationMessages)
+            if (agentConversation == null || agentConversation.Count <= ConversationTrimThreshold)
                 return;
 
-            // Keep: system message (index 0) + first user message (index 1) + last N messages
-            int keepFromEnd = MaxConversationMessages - 2;
+            // Trim down to target to maximize cache hits between trims
+            int keepFromEnd = ConversationTrimTarget - 2;
             if (keepFromEnd < 2) keepFromEnd = 2;
 
             int startIdx = agentConversation.Count - keepFromEnd;
             if (startIdx < 2) startIdx = 2;
 
-            // Ensure we don't start on a tool_result (user) message that has no matching
-            // tool_use (assistant) message before it — scan forward to find a clean boundary.
-            // A clean boundary is a user message with no tool_result parts, or an assistant
-            // message with no tool_use parts (plain text response).
+            // Find a clean boundary: must be a plain assistant message (no tool_use parts)
+            // to ensure proper role alternation after system(0) + first user(1).
+            // Skipping user messages here prevents consecutive user messages in the trimmed result.
             while (startIdx < agentConversation.Count - 2)
             {
                 var msg = agentConversation[startIdx];
-                if (msg.HasToolResult || msg.HasToolUse)
+                if (msg.HasToolResult || msg.HasToolUse || msg.Role != "assistant")
                 {
                     startIdx++;
                     continue;

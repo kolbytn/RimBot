@@ -97,6 +97,13 @@ namespace RimBot.Models
             }
         }
 
+        private static string MapBudgetToReasoningEffort(int budget)
+        {
+            if (budget <= 1024) return "low";
+            if (budget <= 4096) return "medium";
+            return "high";
+        }
+
         private static JObject BuildRequestBody(List<ChatMessage> messages, string model, int maxTokens,
             List<ToolDefinition> tools)
         {
@@ -223,6 +230,13 @@ namespace RimBot.Models
                 ["messages"] = messagesArray
             };
 
+            // Add reasoning effort if thinking budget is configured
+            int thinkingBudget = RimBotMod.Settings.thinkingBudget;
+            if (thinkingBudget > 0)
+            {
+                requestBody["reasoning_effort"] = MapBudgetToReasoningEffort(thinkingBudget);
+            }
+
             // Add tools if provided
             if (tools != null && tools.Count > 0)
             {
@@ -292,7 +306,8 @@ namespace RimBot.Models
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 ReasoningTokens = reasoningTokens,
-                StopReason = finishReason == "tool_calls" ? StopReason.ToolUse : StopReason.EndTurn,
+                StopReason = finishReason == "tool_calls" ? StopReason.ToolUse
+                    : finishReason == "length" ? StopReason.MaxTokens : StopReason.EndTurn,
                 ToolCalls = toolCalls,
                 AssistantParts = assistantParts
             };

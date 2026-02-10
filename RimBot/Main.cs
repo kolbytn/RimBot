@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Reflection;
+using UnityEngine;
 using Verse;
 using HarmonyLib;
 using RimWorld;
@@ -55,10 +56,53 @@ namespace RimBot
     [HarmonyPatch(typeof(TickManager), nameof(TickManager.DoSingleTick))]
     public static class TickManagerPatch
     {
-        public static void Postfix()
+        private static int lastInitMapId = -1;
+        private static int speedForceTicksLeft;
+
+        public static void Postfix(TickManager __instance)
         {
+            if (Current.ProgramState == ProgramState.Playing && Find.CurrentMap != null)
+            {
+                int mapId = Find.CurrentMap.uniqueID;
+                if (mapId != lastInitMapId)
+                {
+                    lastInitMapId = mapId;
+                    speedForceTicksLeft = 120; // keep forcing for ~2 seconds
+                    UnforbidAll(Find.CurrentMap);
+                }
+                if (speedForceTicksLeft > 0)
+                {
+                    __instance.CurTimeSpeed = TimeSpeed.Superfast;
+                    speedForceTicksLeft--;
+                }
+            }
+
             LLMTestUtility.ProcessMainThreadQueue();
             BrainManager.Tick();
+        }
+
+        private static void UnforbidAll(Map map)
+        {
+            int count = 0;
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                var comp = thing.TryGetComp<CompForbiddable>();
+                if (comp != null && comp.Forbidden)
+                {
+                    comp.Forbidden = false;
+                    count++;
+                }
+            }
+            Log.Message("[RimBot] Unforbade " + count + " items on map.");
+        }
+    }
+
+    [HarmonyPatch(typeof(PrefsData), nameof(PrefsData.Apply))]
+    public static class RunInBackgroundPatch
+    {
+        public static void Postfix()
+        {
+            Application.runInBackground = true;
         }
     }
 }

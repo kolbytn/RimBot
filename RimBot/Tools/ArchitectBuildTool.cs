@@ -167,26 +167,11 @@ namespace RimBot.Tools
                     continue;
                 }
 
-                if (cell.GetEdifice(map) != null)
+                var report = GenConstruct.CanPlaceBlueprintAt(buildDef, cell, rotation, map);
+                if (!report.Accepted)
                 {
-                    AddSkipReason(skipReasons, "existing edifice");
-                    skipped++;
-                    continue;
-                }
-
-                bool hasBlueprint = false;
-                var thingList = cell.GetThingList(map);
-                for (int i = 0; i < thingList.Count; i++)
-                {
-                    if (thingList[i] is Blueprint)
-                    {
-                        hasBlueprint = true;
-                        break;
-                    }
-                }
-                if (hasBlueprint)
-                {
-                    AddSkipReason(skipReasons, "existing blueprint");
+                    string reason = report.Reason ?? "blocked";
+                    AddSkipReason(skipReasons, reason);
                     skipped++;
                     continue;
                 }

@@ -18,6 +18,7 @@ namespace RimBot
         private const float ThumbnailSize = 200f;
         private const float TabHeight = 30f;
         private SubTab activeTab = SubTab.History;
+        private static bool showThinking;
 
         public ITab_RimBotHistory()
         {
@@ -181,9 +182,19 @@ namespace RimBot
 
             Text.Font = GameFont.Tiny;
             GUI.color = new Color(0.7f, 0.7f, 0.7f);
-            Widgets.Label(new Rect(rect.x, rect.y, rect.width, 20f),
+            float infoWidth = rect.width - 90f;
+            Widgets.Label(new Rect(rect.x, rect.y, infoWidth, 20f),
                 brain.Provider + " / " + brain.Model + "  |  " + brain.History.Count + " entries");
             GUI.color = Color.white;
+
+            // Thinking toggle
+            Text.Font = GameFont.Tiny;
+            if (Widgets.ButtonText(new Rect(rect.x + infoWidth + 4f, rect.y, 84f, 20f),
+                showThinking ? "Hide Thinking" : "Show Thinking"))
+            {
+                showThinking = !showThinking;
+            }
+
             float y = rect.y + 22f;
 
             // Scrollable history list
@@ -241,7 +252,7 @@ namespace RimBot
             }
 
             // Thinking text
-            if (!string.IsNullOrEmpty(entry.ThinkingText))
+            if (showThinking && !string.IsNullOrEmpty(entry.ThinkingText))
             {
                 height += 18f; // label
                 height += Text.CalcHeight(entry.ThinkingText, textWidth) + 4f;
@@ -373,7 +384,7 @@ namespace RimBot
             }
 
             // Thinking text
-            if (!string.IsNullOrEmpty(entry.ThinkingText))
+            if (showThinking && !string.IsNullOrEmpty(entry.ThinkingText))
             {
                 Text.Font = GameFont.Tiny;
                 GUI.color = new Color(0.5f, 0.8f, 0.9f);

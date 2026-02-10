@@ -65,7 +65,15 @@ namespace RimBot
                     return result;
                 }
 
-                // 2. Append assistant message to conversation
+                // 2. If max tokens with no tool calls, discard this response and retry
+                var hasToolCalls = response.ToolCalls != null && response.ToolCalls.Count > 0;
+                if (response.StopReason == StopReason.MaxTokens && !hasToolCalls)
+                {
+                    Log.Warning("[RimBot] Response hit max tokens with no tool calls — discarding and retrying (iteration " + i + ").");
+                    continue;
+                }
+
+                // 3. Append assistant message to conversation
                 var assistantParts = response.AssistantParts ?? new List<ContentPart>();
                 conversation.Add(new ChatMessage("assistant", assistantParts));
 
@@ -80,8 +88,8 @@ namespace RimBot
                     ReasoningTokens = response.ReasoningTokens
                 };
 
-                // 3. If no tool calls, done
-                if (response.StopReason != StopReason.ToolUse || response.ToolCalls == null || response.ToolCalls.Count == 0)
+                // 4. If no tool calls, done
+                if (response.StopReason != StopReason.ToolUse || !hasToolCalls)
                 {
                     result.Turns.Add(turn);
                     result.Success = true;

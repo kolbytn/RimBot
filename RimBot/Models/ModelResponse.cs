@@ -7,6 +7,7 @@ namespace RimBot.Models
     {
         EndTurn,
         ToolUse,
+        MaxTokens,
         Error
     }
 

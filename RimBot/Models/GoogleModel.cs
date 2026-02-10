@@ -80,6 +80,13 @@ namespace RimBot.Models
             }
         }
 
+        private static string MapBudgetToThinkingLevel(int budget)
+        {
+            if (budget <= 1024) return "low";
+            if (budget <= 4096) return "medium";
+            return "high";
+        }
+
         private static string GetImageModel(string model)
         {
             return "gemini-2.5-flash-image";
@@ -275,10 +282,24 @@ namespace RimBot.Models
             }
             requestBody["contents"] = contentsArray;
 
-            requestBody["generationConfig"] = new JObject
+            var genConfig = new JObject
             {
                 ["maxOutputTokens"] = maxTokens
             };
+
+            int thinkingBudget = RimBotMod.Settings.thinkingBudget;
+            if (thinkingBudget > 0)
+            {
+                // Gemini 3 uses thinkingLevel (string), not thinkingBudget (integer)
+                var thinkingLevel = MapBudgetToThinkingLevel(thinkingBudget);
+                genConfig["thinkingConfig"] = new JObject
+                {
+                    ["thinkingLevel"] = thinkingLevel,
+                    ["includeThoughts"] = true
+                };
+            }
+
+            requestBody["generationConfig"] = genConfig;
 
             return requestBody;
         }
@@ -291,6 +312,7 @@ namespace RimBot.Models
             int inputTokens = usageMeta?["promptTokenCount"]?.Value<int>() ?? 0;
             int outputTokens = usageMeta?["candidatesTokenCount"]?.Value<int>() ?? 0;
             int cacheRead = usageMeta?["cachedContentTokenCount"]?.Value<int>() ?? 0;
+            int reasoningTokens = usageMeta?["thoughtsTokenCount"]?.Value<int>() ?? 0;
             int tokensUsed = usageMeta?["totalTokenCount"]?.Value<int>() ?? 0;
 
             string textContent = null;
@@ -323,18 +345,22 @@ namespace RimBot.Models
                 TokensUsed = tokensUsed,
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
-                CacheReadTokens = cacheRead
+                CacheReadTokens = cacheRead,
+                ReasoningTokens = reasoningTokens
             };
         }
 
         private static ModelResponse ParseToolResponse(string responseJson)
         {
             var parsed = JObject.Parse(responseJson);
-            var parts = parsed["candidates"]?[0]?["content"]?["parts"] as JArray;
+            var candidate = parsed["candidates"]?[0];
+            var parts = candidate?["content"]?["parts"] as JArray;
+            var finishReason = candidate?["finishReason"]?.ToString();
             var usageMeta = parsed["usageMetadata"];
             int inputTokens = usageMeta?["promptTokenCount"]?.Value<int>() ?? 0;
             int outputTokens = usageMeta?["candidatesTokenCount"]?.Value<int>() ?? 0;
             int cacheRead = usageMeta?["cachedContentTokenCount"]?.Value<int>() ?? 0;
+            int reasoningTokens = usageMeta?["thoughtsTokenCount"]?.Value<int>() ?? 0;
             int tokensUsed = usageMeta?["totalTokenCount"]?.Value<int>() ?? 0;
 
             var assistantParts = new List<ContentPart>();
@@ -387,7 +413,9 @@ namespace RimBot.Models
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 CacheReadTokens = cacheRead,
-                StopReason = toolCalls.Count > 0 ? StopReason.ToolUse : StopReason.EndTurn,
+                ReasoningTokens = reasoningTokens,
+                StopReason = toolCalls.Count > 0 ? StopReason.ToolUse
+                    : finishReason == "MAX_TOKENS" ? StopReason.MaxTokens : StopReason.EndTurn,
                 ToolCalls = toolCalls,
                 AssistantParts = assistantParts
             };

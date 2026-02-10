@@ -312,7 +312,8 @@ namespace RimBot.Models
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 CacheReadTokens = cacheRead,
-                StopReason = stopReason == "tool_use" ? StopReason.ToolUse : StopReason.EndTurn,
+                StopReason = stopReason == "tool_use" ? StopReason.ToolUse
+                    : stopReason == "max_tokens" ? StopReason.MaxTokens : StopReason.EndTurn,
                 ToolCalls = toolCalls,
                 AssistantParts = assistantParts
             };
