@@ -96,7 +96,7 @@ namespace RimBot
                 }
                 catch (Exception ex)
                 {
-                    Log.Error("[RimBot] Capture failed for request " + i + ": " + ex.Message);
+                    Log.Warning("[RimBot] Capture failed for request " + i + ": " + ex.Message);
                     results[i] = null;
                 }
             }

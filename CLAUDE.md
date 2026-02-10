@@ -38,7 +38,7 @@ Use this procedure to verify changes whenever you want to test, or when asked to
    The background task will report "failed" due to the force-kill — this is expected and normal.
 5. **Read the logs:** Filter `[RimBot]` lines from:
    ```
-   C:/Users/kolby/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/Player.log
+   %APPDATA%\..\LocalLow\Ludeon Studios\RimWorld by Ludeon Studios\Player.log
    ```
 6. **Report back** with a summary of what happened: brains created, captures fired, LLM responses received, any errors. Include relevant log excerpts.
 

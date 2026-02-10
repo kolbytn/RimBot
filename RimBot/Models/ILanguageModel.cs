@@ -11,7 +11,7 @@ namespace RimBot.Models
         Task<ModelResponse> SendChatRequest(List<ChatMessage> messages, string model, string apiKey, int maxTokens);
         Task<ModelResponse> SendImageRequest(List<ChatMessage> messages, string model, string apiKey, int maxTokens);
         Task<ModelResponse> SendToolRequest(List<ChatMessage> messages, List<ToolDefinition> tools,
-            string model, string apiKey, int maxTokens);
+            string model, string apiKey, int maxTokens, ThinkingLevel thinkingLevel);
         string[] GetAvailableModels();
     }
 }

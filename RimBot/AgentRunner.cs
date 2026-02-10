@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using RimBot.Models;
 using RimBot.Tools;
@@ -36,7 +35,7 @@ namespace RimBot
         public static async Task<AgentResult> RunAgent(
             Brain brain, List<ChatMessage> messages, List<ToolDefinition> tools,
             ILanguageModel llm, string model, string apiKey, int maxTokens,
-            ToolContext toolContext, Action<AgentTurn, int> onTurnComplete = null)
+            ThinkingLevel thinkingLevel, ToolContext toolContext, Action<AgentTurn, int> onTurnComplete = null)
         {
             var conversation = new List<ChatMessage>(messages);
             var result = new AgentResult();
@@ -47,7 +46,7 @@ namespace RimBot
                 ModelResponse response;
                 try
                 {
-                    response = await llm.SendToolRequest(conversation, tools, model, apiKey, maxTokens);
+                    response = await llm.SendToolRequest(conversation, tools, model, apiKey, maxTokens, thinkingLevel);
                 }
                 catch (Exception ex)
                 {

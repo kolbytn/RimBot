@@ -58,7 +58,7 @@ namespace RimBot
                 }
                 catch (Exception ex)
                 {
-                    Log.Error("[RimBot] Error in main thread queue: " + ex.Message);
+                    Log.Warning("[RimBot] Error in main thread queue: " + ex.Message);
                 }
             }
 

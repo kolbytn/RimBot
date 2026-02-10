@@ -80,6 +80,7 @@
     <Compile Include="RimBotMod.cs" />
     <Compile Include="RimBotSettings.cs" />
     <Compile Include="Models\LLMProviderType.cs" />
+    <Compile Include="Models\ThinkingLevel.cs" />
     <Compile Include="Models\ContentPart.cs" />
     <Compile Include="Models\ChatMessage.cs" />
     <Compile Include="Models\ModelResponse.cs" />

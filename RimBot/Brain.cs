@@ -73,6 +73,9 @@ namespace RimBot
             var label = PawnLabel;
             var pawnId = PawnId;
 
+            var profile = RimBotMod.Settings.GetProfileById(ProfileId);
+            var thinkingLevel = profile?.ThinkingLevel ?? Models.ThinkingLevel.Medium;
+
             // Get pawn position on main thread
             var pawn = BrainManager.FindPawnById(pawnId);
             if (pawn == null || !pawn.Spawned)
@@ -168,7 +171,7 @@ namespace RimBot
                 try
                 {
                     var result = await AgentRunner.RunAgent(
-                        this, messages, tools, llmModel, model, apiKey, maxTokens, toolContext, onTurnComplete);
+                        this, messages, tools, llmModel, model, apiKey, maxTokens, thinkingLevel, toolContext, onTurnComplete);
 
                     BrainManager.EnqueueMainThread(() =>
                     {
@@ -179,7 +182,7 @@ namespace RimBot
                         }
                         else
                         {
-                            Log.Error("[RimBot] [AGENT] [" + label + "] Failed: " +
+                            Log.Warning("[RimBot] [AGENT] [" + label + "] Failed: " +
                                 result.ErrorMessage);
 
                             // Pause on rate limit or persistent API errors
@@ -196,7 +199,7 @@ namespace RimBot
                 {
                     BrainManager.EnqueueMainThread(() =>
                     {
-                        Log.Error("[RimBot] [AGENT] [" + label + "] Exception: " + ex.Message);
+                        Log.Warning("[RimBot] [AGENT] [" + label + "] Exception: " + ex.Message);
                     });
                 }
                 finally

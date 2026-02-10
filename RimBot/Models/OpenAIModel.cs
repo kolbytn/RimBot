@@ -29,7 +29,7 @@ namespace RimBot.Models
         {
             try
             {
-                var requestBody = BuildRequestBody(messages, model, maxTokens, null);
+                var requestBody = BuildChatRequestBody(messages, model, maxTokens);
 
                 var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -70,13 +70,13 @@ namespace RimBot.Models
         }
 
         public async Task<ModelResponse> SendToolRequest(List<ChatMessage> messages, List<ToolDefinition> tools,
-            string model, string apiKey, int maxTokens)
+            string model, string apiKey, int maxTokens, ThinkingLevel thinkingLevel)
         {
             try
             {
-                var requestBody = BuildRequestBody(messages, model, maxTokens, tools);
+                var requestBody = BuildResponsesRequestBody(messages, model, maxTokens, tools, thinkingLevel);
 
-                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 request.Content = new StringContent(requestBody.ToString(), Encoding.UTF8, "application/json");
 
@@ -89,7 +89,7 @@ namespace RimBot.Models
                     return ModelResponse.FromError("OpenAI API error (" + response.StatusCode + "): " + flat);
                 }
 
-                return ParseToolResponse(responseJson);
+                return ParseResponsesApiResponse(responseJson);
             }
             catch (Exception ex)
             {
@@ -97,25 +97,44 @@ namespace RimBot.Models
             }
         }
 
-        private static string MapBudgetToReasoningEffort(int budget)
+        private static string MapThinkingLevelToEffort(ThinkingLevel level)
         {
-            if (budget <= 1024) return "low";
-            if (budget <= 4096) return "medium";
-            return "high";
+            switch (level)
+            {
+                case ThinkingLevel.Low: return "low";
+                case ThinkingLevel.Medium: return "medium";
+                case ThinkingLevel.High: return "high";
+                default: return null;
+            }
         }
 
-        private static JObject BuildRequestBody(List<ChatMessage> messages, string model, int maxTokens,
-            List<ToolDefinition> tools)
+        /// <summary>
+        /// Builds request body for the Responses API (/v1/responses).
+        /// </summary>
+        private static JObject BuildResponsesRequestBody(List<ChatMessage> messages, string model, int maxTokens,
+            List<ToolDefinition> tools, ThinkingLevel thinkingLevel)
         {
-            var messagesArray = new JArray();
+            // Extract system messages into top-level instructions
+            string instructions = null;
+            var systemTexts = new List<string>();
             foreach (var msg in messages)
             {
+                if (msg.Role == "system")
+                    systemTexts.Add(msg.Content);
+            }
+            if (systemTexts.Count > 0)
+                instructions = string.Join("\n\n", systemTexts);
+
+            // Build input array from non-system messages
+            var inputArray = new JArray();
+            foreach (var msg in messages)
+            {
+                if (msg.Role == "system")
+                    continue;
+
                 if (msg.HasToolUse && msg.Role == "assistant")
                 {
-                    // Assistant message with tool calls
-                    var msgObj = new JObject { ["role"] = "assistant" };
-
-                    // Extract text content if any
+                    // Assistant text as a message item
                     string textContent = null;
                     foreach (var part in msg.ContentParts)
                     {
@@ -123,68 +142,67 @@ namespace RimBot.Models
                             textContent = part.Text;
                     }
                     if (textContent != null)
-                        msgObj["content"] = textContent;
-
-                    // Build tool_calls array
-                    var toolCallsArr = new JArray();
-                    foreach (var part in msg.ToolUseParts)
                     {
-                        toolCallsArr.Add(new JObject
+                        inputArray.Add(new JObject
                         {
-                            ["id"] = part.ToolCallId,
-                            ["type"] = "function",
-                            ["function"] = new JObject
+                            ["role"] = "assistant",
+                            ["content"] = new JArray(new JObject
                             {
-                                ["name"] = part.ToolName,
-                                ["arguments"] = (part.ToolArguments ?? new JObject()).ToString(Newtonsoft.Json.Formatting.None)
-                            }
+                                ["type"] = "output_text",
+                                ["text"] = textContent
+                            })
                         });
                     }
-                    msgObj["tool_calls"] = toolCallsArr;
-                    messagesArray.Add(msgObj);
+
+                    // Each tool_use part becomes a function_call item
+                    foreach (var part in msg.ToolUseParts)
+                    {
+                        inputArray.Add(new JObject
+                        {
+                            ["type"] = "function_call",
+                            ["name"] = part.ToolName,
+                            ["arguments"] = (part.ToolArguments ?? new JObject()).ToString(Newtonsoft.Json.Formatting.None),
+                            ["call_id"] = part.ToolCallId
+                        });
+                    }
                 }
                 else if (msg.HasToolResult)
                 {
-                    // Each tool result becomes a separate message with role "tool"
+                    // Each tool result becomes a function_call_output item
                     foreach (var part in msg.ToolResultParts)
                     {
-                        messagesArray.Add(new JObject
+                        inputArray.Add(new JObject
                         {
-                            ["role"] = "tool",
-                            ["tool_call_id"] = part.ToolCallId,
-                            ["content"] = part.Text ?? ""
+                            ["type"] = "function_call_output",
+                            ["call_id"] = part.ToolCallId,
+                            ["output"] = part.Text ?? ""
                         });
 
                         // If tool result has an image, add a follow-up user message with the image
                         if (!string.IsNullOrEmpty(part.Base64Data))
                         {
-                            var imgContent = new JArray
-                            {
-                                new JObject
-                                {
-                                    ["type"] = "text",
-                                    ["text"] = "Image result from tool " + part.ToolName + ":"
-                                },
-                                new JObject
-                                {
-                                    ["type"] = "image_url",
-                                    ["image_url"] = new JObject
-                                    {
-                                        ["url"] = "data:" + (part.MediaType ?? "image/png") + ";base64," + part.Base64Data
-                                    }
-                                }
-                            };
-                            messagesArray.Add(new JObject
+                            inputArray.Add(new JObject
                             {
                                 ["role"] = "user",
-                                ["content"] = imgContent
+                                ["content"] = new JArray(
+                                    new JObject
+                                    {
+                                        ["type"] = "input_text",
+                                        ["text"] = "Image result from tool " + part.ToolName + ":"
+                                    },
+                                    new JObject
+                                    {
+                                        ["type"] = "input_image",
+                                        ["image_url"] = "data:" + (part.MediaType ?? "image/png") + ";base64," + part.Base64Data
+                                    }
+                                )
                             });
                         }
                     }
                 }
                 else
                 {
-                    // Standard message
+                    // Standard user/assistant message
                     var msgObj = new JObject { ["role"] = msg.Role };
 
                     if (msg.HasImages)
@@ -196,7 +214,7 @@ namespace RimBot.Models
                             {
                                 contentArray.Add(new JObject
                                 {
-                                    ["type"] = "text",
+                                    ["type"] = "input_text",
                                     ["text"] = part.Text
                                 });
                             }
@@ -204,40 +222,56 @@ namespace RimBot.Models
                             {
                                 contentArray.Add(new JObject
                                 {
-                                    ["type"] = "image_url",
-                                    ["image_url"] = new JObject
-                                    {
-                                        ["url"] = "data:" + part.MediaType + ";base64," + part.Base64Data
-                                    }
+                                    ["type"] = "input_image",
+                                    ["image_url"] = "data:" + part.MediaType + ";base64," + part.Base64Data
                                 });
                             }
                         }
                         msgObj["content"] = contentArray;
                     }
+                    else if (msg.Role == "assistant")
+                    {
+                        msgObj["content"] = new JArray(new JObject
+                        {
+                            ["type"] = "output_text",
+                            ["text"] = msg.Content ?? ""
+                        });
+                    }
                     else
                     {
-                        msgObj["content"] = msg.Content;
+                        msgObj["content"] = new JArray(new JObject
+                        {
+                            ["type"] = "input_text",
+                            ["text"] = msg.Content ?? ""
+                        });
                     }
 
-                    messagesArray.Add(msgObj);
+                    inputArray.Add(msgObj);
                 }
             }
 
             var requestBody = new JObject
             {
                 ["model"] = model,
-                ["max_completion_tokens"] = maxTokens,
-                ["messages"] = messagesArray
+                ["max_output_tokens"] = maxTokens,
+                ["input"] = inputArray
             };
 
-            // Add reasoning effort if thinking budget is configured
-            int thinkingBudget = RimBotMod.Settings.thinkingBudget;
-            if (thinkingBudget > 0)
+            if (instructions != null)
+                requestBody["instructions"] = instructions;
+
+            // Add reasoning config
+            var effort = MapThinkingLevelToEffort(thinkingLevel);
+            if (effort != null)
             {
-                requestBody["reasoning_effort"] = MapBudgetToReasoningEffort(thinkingBudget);
+                requestBody["reasoning"] = new JObject
+                {
+                    ["effort"] = effort,
+                    ["summary"] = "concise"
+                };
             }
 
-            // Add tools if provided
+            // Add tools
             if (tools != null && tools.Count > 0)
             {
                 var toolsArray = new JArray();
@@ -246,12 +280,9 @@ namespace RimBot.Models
                     toolsArray.Add(new JObject
                     {
                         ["type"] = "function",
-                        ["function"] = new JObject
-                        {
-                            ["name"] = tool.Name,
-                            ["description"] = tool.Description,
-                            ["parameters"] = JObject.Parse(tool.ParametersJson)
-                        }
+                        ["name"] = tool.Name,
+                        ["description"] = tool.Description,
+                        ["parameters"] = JObject.Parse(tool.ParametersJson)
                     });
                 }
                 requestBody["tools"] = toolsArray;
@@ -260,56 +291,148 @@ namespace RimBot.Models
             return requestBody;
         }
 
-        private static ModelResponse ParseToolResponse(string responseJson)
+        /// <summary>
+        /// Parses response from the Responses API (/v1/responses).
+        /// </summary>
+        private static ModelResponse ParseResponsesApiResponse(string responseJson)
         {
             var parsed = JObject.Parse(responseJson);
-            var choice = parsed["choices"]?[0];
-            var message = choice?["message"];
-            var finishReason = choice?["finish_reason"]?.ToString();
+            var outputArray = parsed["output"] as JArray;
             var usage = parsed["usage"];
-            int inputTokens = usage?["prompt_tokens"]?.Value<int>() ?? 0;
-            int outputTokens = usage?["completion_tokens"]?.Value<int>() ?? 0;
-            int reasoningTokens = usage?["completion_tokens_details"]?["reasoning_tokens"]?.Value<int>() ?? 0;
-            int tokensUsed = usage?["total_tokens"]?.Value<int>() ?? 0;
+            int inputTokens = usage?["input_tokens"]?.Value<int>() ?? 0;
+            int outputTokens = usage?["output_tokens"]?.Value<int>() ?? 0;
+            int reasoningTokens = usage?["output_tokens_details"]?["reasoning_tokens"]?.Value<int>() ?? 0;
 
             var assistantParts = new List<ContentPart>();
             var toolCalls = new List<ToolCall>();
+            string textContent = null;
 
-            var content = message?["content"]?.ToString();
-            if (!string.IsNullOrEmpty(content))
-                assistantParts.Add(ContentPart.FromText(content));
-
-            var toolCallsArr = message?["tool_calls"] as JArray;
-            if (toolCallsArr != null)
+            if (outputArray != null)
             {
-                foreach (var tc in toolCallsArr)
+                foreach (var item in outputArray)
                 {
-                    var id = tc["id"]?.ToString();
-                    var fn = tc["function"];
-                    var name = fn?["name"]?.ToString();
-                    var argsStr = fn?["arguments"]?.ToString();
-                    JObject args;
-                    try { args = JObject.Parse(argsStr ?? "{}"); }
-                    catch { args = new JObject(); }
+                    var itemType = item["type"]?.ToString();
 
-                    assistantParts.Add(ContentPart.FromToolUse(id, name, args));
-                    toolCalls.Add(new ToolCall { Id = id, Name = name, Arguments = args });
+                    if (itemType == "reasoning")
+                    {
+                        // Extract reasoning summary text
+                        var summaryArray = item["summary"] as JArray;
+                        if (summaryArray != null)
+                        {
+                            foreach (var summaryItem in summaryArray)
+                            {
+                                if (summaryItem["type"]?.ToString() == "summary_text")
+                                {
+                                    var summaryText = summaryItem["text"]?.ToString();
+                                    if (!string.IsNullOrEmpty(summaryText))
+                                        assistantParts.Add(ContentPart.FromThinking(null, summaryText));
+                                }
+                            }
+                        }
+                    }
+                    else if (itemType == "message")
+                    {
+                        var contentArr = item["content"] as JArray;
+                        if (contentArr != null)
+                        {
+                            foreach (var contentItem in contentArr)
+                            {
+                                if (contentItem["type"]?.ToString() == "output_text")
+                                {
+                                    var text = contentItem["text"]?.ToString();
+                                    if (!string.IsNullOrEmpty(text))
+                                    {
+                                        assistantParts.Add(ContentPart.FromText(text));
+                                        if (textContent == null)
+                                            textContent = text;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (itemType == "function_call")
+                    {
+                        var callId = item["call_id"]?.ToString();
+                        var name = item["name"]?.ToString();
+                        var argsStr = item["arguments"]?.ToString();
+                        JObject args;
+                        try { args = JObject.Parse(argsStr ?? "{}"); }
+                        catch { args = new JObject(); }
+
+                        assistantParts.Add(ContentPart.FromToolUse(callId, name, args));
+                        toolCalls.Add(new ToolCall { Id = callId, Name = name, Arguments = args });
+                    }
                 }
             }
+
+            var stopReason = parsed["status"]?.ToString();
 
             return new ModelResponse
             {
                 Success = true,
-                Content = content,
+                Content = textContent,
                 RawJson = responseJson,
-                TokensUsed = tokensUsed,
+                TokensUsed = inputTokens + outputTokens,
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 ReasoningTokens = reasoningTokens,
-                StopReason = finishReason == "tool_calls" ? StopReason.ToolUse
-                    : finishReason == "length" ? StopReason.MaxTokens : StopReason.EndTurn,
+                StopReason = toolCalls.Count > 0 ? StopReason.ToolUse
+                    : stopReason == "incomplete" ? StopReason.MaxTokens : StopReason.EndTurn,
                 ToolCalls = toolCalls,
                 AssistantParts = assistantParts
+            };
+        }
+
+        /// <summary>
+        /// Builds request body for the Chat Completions API (used by SendChatRequest only).
+        /// </summary>
+        private static JObject BuildChatRequestBody(List<ChatMessage> messages, string model, int maxTokens)
+        {
+            var messagesArray = new JArray();
+            foreach (var msg in messages)
+            {
+                var msgObj = new JObject { ["role"] = msg.Role };
+
+                if (msg.HasImages)
+                {
+                    var contentArray = new JArray();
+                    foreach (var part in msg.ContentParts)
+                    {
+                        if (part.Type == "text")
+                        {
+                            contentArray.Add(new JObject
+                            {
+                                ["type"] = "text",
+                                ["text"] = part.Text
+                            });
+                        }
+                        else if (part.Type == "image_url")
+                        {
+                            contentArray.Add(new JObject
+                            {
+                                ["type"] = "image_url",
+                                ["image_url"] = new JObject
+                                {
+                                    ["url"] = "data:" + part.MediaType + ";base64," + part.Base64Data
+                                }
+                            });
+                        }
+                    }
+                    msgObj["content"] = contentArray;
+                }
+                else
+                {
+                    msgObj["content"] = msg.Content;
+                }
+
+                messagesArray.Add(msgObj);
+            }
+
+            return new JObject
+            {
+                ["model"] = model,
+                ["max_completion_tokens"] = maxTokens,
+                ["messages"] = messagesArray
             };
         }
 

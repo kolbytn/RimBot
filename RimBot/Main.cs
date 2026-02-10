@@ -58,6 +58,7 @@ namespace RimBot
     {
         private static int lastInitMapId = -1;
         private static int speedForceTicksLeft;
+        private static bool prefsApplied;
 
         public static void Postfix(TickManager __instance)
         {
@@ -75,6 +76,28 @@ namespace RimBot
                 {
                     __instance.CurTimeSpeed = TimeSpeed.Superfast;
                     speedForceTicksLeft--;
+                }
+            }
+
+            if (!prefsApplied)
+            {
+                prefsApplied = true;
+                try
+                {
+                    var dataField = typeof(Prefs).GetField("data", BindingFlags.Static | BindingFlags.NonPublic);
+                    if (dataField != null)
+                    {
+                        var prefsData = dataField.GetValue(null) as PrefsData;
+                        if (prefsData != null)
+                        {
+                            prefsData.openLogOnWarnings = false;
+                            Log.Message("[RimBot] Disabled log auto-open.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning("[RimBot] Could not disable log auto-open: " + ex.Message);
                 }
             }
 

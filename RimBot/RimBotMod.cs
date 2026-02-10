@@ -166,11 +166,6 @@ namespace RimBot
             Settings.maxTokens = (int)listing.Slider(Settings.maxTokens, 64, 4096);
             listing.Label("Max Tokens: " + Settings.maxTokens);
 
-            listing.Gap();
-
-            Settings.thinkingBudget = (int)(listing.Slider(Settings.thinkingBudget, 0, 8192) / 256) * 256;
-            listing.Label("Thinking Budget: " + (Settings.thinkingBudget == 0 ? "Disabled" : Settings.thinkingBudget.ToString()));
-
             listing.End();
         }
     }

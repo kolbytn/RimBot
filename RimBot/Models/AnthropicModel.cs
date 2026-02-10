@@ -74,12 +74,23 @@ namespace RimBot.Models
             }
         }
 
+        private static int MapThinkingLevelToBudget(ThinkingLevel level)
+        {
+            switch (level)
+            {
+                case ThinkingLevel.Low: return 1024;
+                case ThinkingLevel.Medium: return 4096;
+                case ThinkingLevel.High: return 8192;
+                default: return 0;
+            }
+        }
+
         public async Task<ModelResponse> SendToolRequest(List<ChatMessage> messages, List<ToolDefinition> tools,
-            string model, string apiKey, int maxTokens)
+            string model, string apiKey, int maxTokens, ThinkingLevel thinkingLevel)
         {
             try
             {
-                int thinkingBudget = RimBotMod.Settings.thinkingBudget;
+                int thinkingBudget = MapThinkingLevelToBudget(thinkingLevel);
                 var requestBody = BuildRequestBody(messages, model, maxTokens, tools, thinkingBudget);
 
                 var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");

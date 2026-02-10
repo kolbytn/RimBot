@@ -114,19 +114,76 @@ namespace RimBot
                     comp.ClearAssignment(pawnId);
                 }));
 
-                foreach (var profile in settings.profiles)
+                var capturedCurrentProfile = currentProfile;
+                foreach (LLMProviderType providerType in Enum.GetValues(typeof(LLMProviderType)))
                 {
-                    if (string.IsNullOrEmpty(settings.GetApiKeyForProvider(profile.Provider)))
+                    if (string.IsNullOrEmpty(settings.GetApiKeyForProvider(providerType)))
                         continue;
-                    var captured = profile;
-                    options.Add(new FloatMenuOption(
-                        profile.Provider + " / " + profile.Model,
-                        () => comp.SetAssignment(pawnId, captured.Id)));
+                    var models = LLMModelFactory.GetModel(providerType).GetAvailableModels();
+                    foreach (var model in models)
+                    {
+                        var capturedProvider = providerType;
+                        var capturedModel = model;
+                        options.Add(new FloatMenuOption(
+                            providerType + " / " + model,
+                            () =>
+                            {
+                                // If colonist already has a profile, update it in place
+                                if (capturedCurrentProfile != null)
+                                {
+                                    capturedCurrentProfile.Provider = capturedProvider;
+                                    capturedCurrentProfile.Model = capturedModel;
+                                    settings.SerializeProfiles();
+                                    return;
+                                }
+                                // Otherwise find or create a profile
+                                AgentProfile match = null;
+                                foreach (var p in settings.profiles)
+                                {
+                                    if (p.Provider == capturedProvider && p.Model == capturedModel)
+                                    {
+                                        match = p;
+                                        break;
+                                    }
+                                }
+                                if (match == null)
+                                {
+                                    match = new AgentProfile(capturedProvider, capturedModel);
+                                    settings.profiles.Add(match);
+                                    settings.SerializeProfiles();
+                                }
+                                comp.SetAssignment(pawnId, match.Id);
+                            }));
+                    }
                 }
 
                 Find.WindowStack.Add(new FloatMenu(options));
             }
             y += 34f;
+
+            // Thinking level dropdown
+            if (currentProfile != null)
+            {
+                Widgets.Label(new Rect(x, y, width, 24f), "Thinking Level:");
+                y += 26f;
+
+                string thinkingLabel = currentProfile.ThinkingLevel.ToString();
+                if (Widgets.ButtonText(new Rect(x, y, width, 30f), thinkingLabel))
+                {
+                    var thinkingOptions = new List<FloatMenuOption>();
+                    foreach (ThinkingLevel level in Enum.GetValues(typeof(ThinkingLevel)))
+                    {
+                        var capturedLevel = level;
+                        thinkingOptions.Add(new FloatMenuOption(level.ToString(), () =>
+                        {
+                            currentProfile.ThinkingLevel = capturedLevel;
+                            settings.SerializeProfiles();
+                        }));
+                    }
+                    Find.WindowStack.Add(new FloatMenu(thinkingOptions));
+                }
+                y += 34f;
+            }
 
             // Brain status
             Text.Font = GameFont.Tiny;

@@ -53,11 +53,11 @@ namespace RimBot.Models
         }
 
         public async Task<ModelResponse> SendToolRequest(List<ChatMessage> messages, List<ToolDefinition> tools,
-            string model, string apiKey, int maxTokens)
+            string model, string apiKey, int maxTokens, ThinkingLevel thinkingLevel)
         {
             try
             {
-                var requestBody = BuildRequestBody(messages, maxTokens, tools);
+                var requestBody = BuildRequestBody(messages, maxTokens, tools, model, thinkingLevel);
 
                 var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
@@ -80,11 +80,30 @@ namespace RimBot.Models
             }
         }
 
-        private static string MapBudgetToThinkingLevel(int budget)
+        private static string MapThinkingLevel(ThinkingLevel level, string model)
         {
-            if (budget <= 1024) return "low";
-            if (budget <= 4096) return "medium";
-            return "high";
+            bool isPro = model != null && model.Contains("pro");
+            if (isPro)
+            {
+                // Gemini 3 Pro only supports low and high
+                switch (level)
+                {
+                    case ThinkingLevel.None: return "low";
+                    case ThinkingLevel.Low: return "low";
+                    default: return "high";
+                }
+            }
+            else
+            {
+                // Gemini 3 Flash — can't fully disable thinking
+                switch (level)
+                {
+                    case ThinkingLevel.None: return "minimal";
+                    case ThinkingLevel.Low: return "low";
+                    case ThinkingLevel.Medium: return "medium";
+                    default: return "high";
+                }
+            }
         }
 
         private static string GetImageModel(string model)
@@ -161,7 +180,8 @@ namespace RimBot.Models
             return result;
         }
 
-        private static JObject BuildRequestBody(List<ChatMessage> messages, int maxTokens, List<ToolDefinition> tools)
+        private static JObject BuildRequestBody(List<ChatMessage> messages, int maxTokens, List<ToolDefinition> tools,
+            string model = null, ThinkingLevel thinkingLevel = ThinkingLevel.Medium)
         {
             var systemMessages = messages.Where(m => m.Role == "system").ToList();
             var nonSystemMessages = messages.Where(m => m.Role != "system").ToList();
@@ -287,17 +307,12 @@ namespace RimBot.Models
                 ["maxOutputTokens"] = maxTokens
             };
 
-            int thinkingBudget = RimBotMod.Settings.thinkingBudget;
-            if (thinkingBudget > 0)
+            var thinkingLevelStr = MapThinkingLevel(thinkingLevel, model);
+            genConfig["thinkingConfig"] = new JObject
             {
-                // Gemini 3 uses thinkingLevel (string), not thinkingBudget (integer)
-                var thinkingLevel = MapBudgetToThinkingLevel(thinkingBudget);
-                genConfig["thinkingConfig"] = new JObject
-                {
-                    ["thinkingLevel"] = thinkingLevel,
-                    ["includeThoughts"] = true
-                };
-            }
+                ["thinkingLevel"] = thinkingLevelStr,
+                ["includeThoughts"] = true
+            };
 
             requestBody["generationConfig"] = genConfig;
 

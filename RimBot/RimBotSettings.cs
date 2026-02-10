@@ -11,7 +11,6 @@ namespace RimBot
         public string openAIApiKey = "";
         public string googleApiKey = "";
         public int maxTokens = 1024;
-        public int thinkingBudget = 2048;
         public string serializedProfiles = "";
 
         [Unsaved]
@@ -26,7 +25,6 @@ namespace RimBot
             Scribe_Values.Look(ref openAIApiKey, "openAIApiKey", "");
             Scribe_Values.Look(ref googleApiKey, "googleApiKey", "");
             Scribe_Values.Look(ref maxTokens, "maxTokens", 1024);
-            Scribe_Values.Look(ref thinkingBudget, "thinkingBudget", 2048);
             Scribe_Values.Look(ref serializedProfiles, "serializedProfiles", "");
             base.ExposeData();
 
@@ -51,7 +49,7 @@ namespace RimBot
             var parts = new List<string>();
             foreach (var p in profiles)
             {
-                parts.Add(p.Id + "|" + (int)p.Provider + "|" + p.Model);
+                parts.Add(p.Id + "|" + (int)p.Provider + "|" + p.Model + "|" + (int)p.ThinkingLevel);
             }
             serializedProfiles = string.Join(";;", parts.ToArray());
         }
@@ -73,12 +71,21 @@ namespace RimBot
                 if (!int.TryParse(fields[1], out providerInt))
                     continue;
 
-                profiles.Add(new AgentProfile
+                var profile = new AgentProfile
                 {
                     Id = fields[0],
                     Provider = (LLMProviderType)providerInt,
                     Model = fields[2]
-                });
+                };
+
+                if (fields.Length >= 4)
+                {
+                    int thinkingInt;
+                    if (int.TryParse(fields[3], out thinkingInt))
+                        profile.ThinkingLevel = (Models.ThinkingLevel)thinkingInt;
+                }
+
+                profiles.Add(profile);
             }
         }
 
