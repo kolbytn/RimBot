@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download RimWorld reference assemblies
+        run: |
+          dotnet new tool-manifest --force
+          dotnet tool install NuGet.CommandLine --version 6.* --tool-path ./tools
+          ./tools/nuget install Krafs.Rimworld.Ref -Version 1.6.4633 -OutputDirectory ./packages
+          echo "RIMWORLD_MANAGED=$(pwd)/packages/Krafs.Rimworld.Ref.1.6.4633/ref/net472" >> $GITHUB_ENV
+
+      - name: Build
+        run: dotnet build RimBot.slnx -c Release -p:RimWorldManagedPath="$RIMWORLD_MANAGED" -p:CI=true
+
+      - name: Package mod
+        run: |
+          mkdir -p RimBot-mod/About
+          mkdir -p RimBot-mod/1.6/Assemblies
+          cp About/About.xml RimBot-mod/About/
+          cp RimBot/bin/Release/RimBot.dll RimBot-mod/1.6/Assemblies/
+          cp RimBot/bin/Release/Newtonsoft.Json.dll RimBot-mod/1.6/Assemblies/
+          cd RimBot-mod && zip -r ../RimBot.zip .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RimBot.zip
+          generate_release_notes: true
