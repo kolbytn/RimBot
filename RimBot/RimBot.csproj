@@ -44,7 +44,10 @@
       <HintPath>$(RimWorldManagedPath)\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="netstandard" />
+    <Reference Include="netstandard">
+      <HintPath>$(RimWorldManagedPath)\netstandard.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
