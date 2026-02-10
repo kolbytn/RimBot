@@ -78,7 +78,6 @@ namespace RimBot
                 }
             }
 
-            LLMTestUtility.ProcessMainThreadQueue();
             BrainManager.Tick();
         }
 

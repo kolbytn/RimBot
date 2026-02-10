@@ -70,8 +70,6 @@ namespace RimBot
             SyncConfigColonists();
             SyncBrains();
 
-            ArchitectMode.CheckAutoStart();
-
             float now = Time.realtimeSinceStartup;
             foreach (var kvp in brains)
             {

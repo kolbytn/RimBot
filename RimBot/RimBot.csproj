@@ -77,7 +77,6 @@
     <Compile Include="AgentProfile.cs" />
     <Compile Include="ColonyAssignmentComponent.cs" />
     <Compile Include="Main.cs" />
-    <Compile Include="LLMTestUtility.cs" />
     <Compile Include="RimBotMod.cs" />
     <Compile Include="RimBotSettings.cs" />
     <Compile Include="Models\LLMProviderType.cs" />
@@ -94,7 +93,6 @@
     <Compile Include="Brain.cs" />
     <Compile Include="BrainManager.cs" />
     <Compile Include="ScreenshotCapture.cs" />
-    <Compile Include="ArchitectMode.cs" />
     <Compile Include="AgentRunner.cs" />
     <Compile Include="Tools\ToolTypes.cs" />
     <Compile Include="Tools\GetScreenshotTool.cs" />

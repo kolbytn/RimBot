@@ -80,7 +80,7 @@ Feel free to add temporary `Log.Message("[RimBot] ...")` statements anywhere in 
 ### Brain System
 
 - **`BrainManager.cs`** — Static manager. `Tick()` syncs brains with colonists (creates/removes based on profile assignments), triggers agent loops for idle brains. Key constant: 30s agent cooldown. Uses `ConcurrentQueue<Action>` for background-to-main-thread dispatch.
-- **`Brain.cs`** — Per-colonist agent. Maintains conversation history (auto-trimmed at 40 messages to 24), up to 50 history entries. `RunAgentLoop()` builds context, spawns async Task to call `AgentRunner.RunAgent()`. Records each turn to history in real-time via callback. Also has `SendToLLM()` (vision mode) and `GenerateArchitectPlan()` (architect mode).
+- **`Brain.cs`** — Per-colonist agent. Maintains conversation history (auto-trimmed at 40 messages to 24), up to 50 history entries. `RunAgentLoop()` builds context, spawns async Task to call `AgentRunner.RunAgent()`. Records each turn to history in real-time via callback.
 - **`AgentRunner.cs`** — Stateless agentic loop. Calls LLM, executes tool calls on main thread via `TaskCompletionSource` bridge, loops up to 10 iterations. Discards max-token responses with no tool calls to prevent runaway outputs. Fires `onTurnComplete` callback after each iteration.
 - **`AgentProfile.cs`** — Data model: GUID + provider + model string.
 - **`ColonyAssignmentComponent.cs`** — `GameComponent` mapping pawn IDs to profile IDs. Handles round-robin auto-assignment and config-spawned colonist tracking.
@@ -128,11 +128,6 @@ Key gotcha: `Camera.Render()` produces black images if map section meshes haven'
 ### Threading Model
 
 LLM network calls run on background threads via `Task.Run`. All Unity/RimWorld API access (tool execution, UI updates, history recording) must happen on the main thread. `BrainManager.EnqueueMainThread()` uses a `ConcurrentQueue<Action>` drained every tick by `TickManagerPatch`.
-
-### Debugging
-
-- **`LLMTestUtility.cs`** — Sends a one-off test message to verify API connectivity.
-- **`ArchitectMode.cs`** — Test mode for architect-style LLM-guided building placement.
 
 ## Dependencies
 

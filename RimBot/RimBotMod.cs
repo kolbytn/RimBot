@@ -171,18 +171,6 @@ namespace RimBot
             Settings.thinkingBudget = (int)(listing.Slider(Settings.thinkingBudget, 0, 8192) / 256) * 256;
             listing.Label("Thinking Budget: " + (Settings.thinkingBudget == 0 ? "Disabled" : Settings.thinkingBudget.ToString()));
 
-            listing.GapLine();
-
-            if (listing.ButtonText("Send Test Message"))
-            {
-                LLMTestUtility.SendTestMessage();
-            }
-
-            if (listing.ButtonText(ArchitectMode.IsRunning ? "Stop Architect Mode" : "Start Architect Mode"))
-            {
-                ArchitectMode.Toggle();
-            }
-
             listing.End();
         }
     }

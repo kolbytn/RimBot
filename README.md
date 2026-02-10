@@ -41,7 +41,6 @@ Open the settings panel from **Options > Mod Settings > RimBot**. Available sett
 | Auto-assign new colonists | On | When enabled, newly arrived colonists are automatically assigned to profiles in round-robin order. Only visible during an active game. |
 | Max Tokens | 1024 | Maximum response tokens per LLM call (64–4096). Higher values let the LLM give longer responses but cost more. |
 | Thinking Budget | 2048 | Extended thinking token budget (0–8192, increments of 256). Set to 0 to disable extended thinking. Higher values give the LLM more reasoning capacity. |
-| Send Test Message | — | Debug button to verify API connectivity. Check the game log for results. |
 
 ### Colonist Inspector Tab
 
@@ -138,9 +137,6 @@ RimBot/
   ColonyAssignmentComponent.cs  Pawn-to-profile assignment tracking
   HistoryEntry.cs          Data model for LLM interaction records
   ITab_RimBotHistory.cs    Inspector tab UI for viewing agent history
-  LLMTestUtility.cs        Debug test message utility
-  ArchitectMode.cs         Architect placement mode
-
   Models/
     ILanguageModel.cs      Provider interface (chat, image, tool requests)
     AnthropicModel.cs      Claude API implementation
