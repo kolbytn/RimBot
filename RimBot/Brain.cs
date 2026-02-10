@@ -163,12 +163,17 @@ namespace RimBot
 
             var sysPromptForHistory = isFirstCycle ? agentConversation[0].Content : null;
 
+            Action<AgentTurn, int> onTurnComplete = (turn, index) =>
+            {
+                BrainManager.EnqueueMainThread(() => RecordSingleTurn(turn, index, sysPromptForHistory));
+            };
+
             Task.Run(async () =>
             {
                 try
                 {
                     var result = await AgentRunner.RunAgent(
-                        this, messages, tools, llmModel, model, apiKey, maxTokens, toolContext);
+                        this, messages, tools, llmModel, model, apiKey, maxTokens, toolContext, onTurnComplete);
 
                     BrainManager.EnqueueMainThread(() =>
                     {
@@ -190,8 +195,6 @@ namespace RimBot
                         // Persist the conversation for next cycle
                         if (result.FinalConversation != null)
                             agentConversation = result.FinalConversation;
-
-                        RecordAgentHistory(result, sysPromptForHistory);
                     });
                 }
                 catch (Exception ex)
@@ -258,93 +261,88 @@ namespace RimBot
             Log.Message("[RimBot] [AGENT] [" + PawnLabel + "] Trimmed conversation to " + agentConversation.Count + " messages");
         }
 
-        private void RecordAgentHistory(AgentResult result, string systemPrompt)
+        private void RecordSingleTurn(AgentTurn turn, int iterIndex, string systemPrompt)
         {
-            for (int i = 0; i < result.Turns.Count; i++)
+            // Extract text and thinking from assistant parts
+            string responseText = "";
+            string thinkingText = "";
+            foreach (var part in turn.AssistantParts ?? new List<ContentPart>())
             {
-                var turn = result.Turns[i];
-
-                // Extract text and thinking from assistant parts
-                string responseText = "";
-                string thinkingText = "";
-                foreach (var part in turn.AssistantParts ?? new List<ContentPart>())
-                {
-                    if (part.Type == "text" && !string.IsNullOrEmpty(part.Text))
-                        responseText += part.Text + "\n";
-                    else if (part.Type == "thinking" && !part.IsRedacted && !string.IsNullOrEmpty(part.Text))
-                        thinkingText += part.Text + "\n";
-                }
-                responseText = responseText.TrimEnd();
-                thinkingText = thinkingText.TrimEnd();
-
-                // Find screenshot from tool results if any
-                string screenshotBase64 = null;
-                if (turn.ToolResults != null)
-                {
-                    foreach (var tr in turn.ToolResults)
-                    {
-                        if (!string.IsNullOrEmpty(tr.ImageBase64))
-                        {
-                            screenshotBase64 = tr.ImageBase64;
-                            break;
-                        }
-                    }
-                }
-
-                // Build tool call/result records
-                var toolCallRecords = new List<ToolCallRecord>();
-                var toolResultRecords = new List<ToolResultRecord>();
-
-                if (turn.ToolCalls != null)
-                {
-                    foreach (var tc in turn.ToolCalls)
-                    {
-                        toolCallRecords.Add(new ToolCallRecord
-                        {
-                            Id = tc.Id,
-                            Name = tc.Name,
-                            ArgumentsJson = tc.Arguments?.ToString(Newtonsoft.Json.Formatting.None) ?? "{}"
-                        });
-                    }
-                }
-
-                if (turn.ToolResults != null)
-                {
-                    foreach (var tr in turn.ToolResults)
-                    {
-                        toolResultRecords.Add(new ToolResultRecord
-                        {
-                            ToolCallId = tr.ToolCallId,
-                            Success = tr.Success,
-                            Content = tr.Content,
-                            HasImage = !string.IsNullOrEmpty(tr.ImageBase64)
-                        });
-                    }
-                }
-
-                var entry = new HistoryEntry
-                {
-                    GameTick = Find.TickManager != null ? Find.TickManager.TicksGame : 0,
-                    Mode = "Agent",
-                    SystemPrompt = i == 0 ? systemPrompt : null,
-                    UserQuery = null,
-                    ResponseText = string.IsNullOrEmpty(responseText) ? turn.ErrorMessage : responseText,
-                    Success = turn.ErrorMessage == null,
-                    Provider = Provider,
-                    ModelName = Model,
-                    ScreenshotBase64 = screenshotBase64,
-                    ToolCalls = toolCallRecords,
-                    ToolResults = toolResultRecords,
-                    AgentIteration = i + 1,
-                    ThinkingText = string.IsNullOrEmpty(thinkingText) ? null : thinkingText,
-                    InputTokens = turn.InputTokens,
-                    OutputTokens = turn.OutputTokens,
-                    CacheReadTokens = turn.CacheReadTokens,
-                    ReasoningTokens = turn.ReasoningTokens
-                };
-
-                history.Insert(0, entry);
+                if (part.Type == "text" && !string.IsNullOrEmpty(part.Text))
+                    responseText += part.Text + "\n";
+                else if (part.Type == "thinking" && !part.IsRedacted && !string.IsNullOrEmpty(part.Text))
+                    thinkingText += part.Text + "\n";
             }
+            responseText = responseText.TrimEnd();
+            thinkingText = thinkingText.TrimEnd();
+
+            // Find screenshot from tool results if any
+            string screenshotBase64 = null;
+            if (turn.ToolResults != null)
+            {
+                foreach (var tr in turn.ToolResults)
+                {
+                    if (!string.IsNullOrEmpty(tr.ImageBase64))
+                    {
+                        screenshotBase64 = tr.ImageBase64;
+                        break;
+                    }
+                }
+            }
+
+            // Build tool call/result records
+            var toolCallRecords = new List<ToolCallRecord>();
+            var toolResultRecords = new List<ToolResultRecord>();
+
+            if (turn.ToolCalls != null)
+            {
+                foreach (var tc in turn.ToolCalls)
+                {
+                    toolCallRecords.Add(new ToolCallRecord
+                    {
+                        Id = tc.Id,
+                        Name = tc.Name,
+                        ArgumentsJson = tc.Arguments?.ToString(Newtonsoft.Json.Formatting.None) ?? "{}"
+                    });
+                }
+            }
+
+            if (turn.ToolResults != null)
+            {
+                foreach (var tr in turn.ToolResults)
+                {
+                    toolResultRecords.Add(new ToolResultRecord
+                    {
+                        ToolCallId = tr.ToolCallId,
+                        Success = tr.Success,
+                        Content = tr.Content,
+                        HasImage = !string.IsNullOrEmpty(tr.ImageBase64)
+                    });
+                }
+            }
+
+            var entry = new HistoryEntry
+            {
+                GameTick = Find.TickManager != null ? Find.TickManager.TicksGame : 0,
+                Mode = "Agent",
+                SystemPrompt = iterIndex == 0 ? systemPrompt : null,
+                UserQuery = null,
+                ResponseText = string.IsNullOrEmpty(responseText) ? turn.ErrorMessage : responseText,
+                Success = turn.ErrorMessage == null,
+                Provider = Provider,
+                ModelName = Model,
+                ScreenshotBase64 = screenshotBase64,
+                ToolCalls = toolCallRecords,
+                ToolResults = toolResultRecords,
+                AgentIteration = iterIndex + 1,
+                ThinkingText = string.IsNullOrEmpty(thinkingText) ? null : thinkingText,
+                InputTokens = turn.InputTokens,
+                OutputTokens = turn.OutputTokens,
+                CacheReadTokens = turn.CacheReadTokens,
+                ReasoningTokens = turn.ReasoningTokens
+            };
+
+            history.Insert(0, entry);
 
             while (history.Count > MaxHistoryEntries)
             {

@@ -69,6 +69,7 @@ namespace RimBot
                     lastInitMapId = mapId;
                     speedForceTicksLeft = 120; // keep forcing for ~2 seconds
                     UnforbidAll(Find.CurrentMap);
+                    EnableAllWork(Find.CurrentMap);
                 }
                 if (speedForceTicksLeft > 0)
                 {
@@ -94,6 +95,21 @@ namespace RimBot
                 }
             }
             Log.Message("[RimBot] Unforbade " + count + " items on map.");
+        }
+
+        private static void EnableAllWork(Map map)
+        {
+            foreach (var pawn in map.mapPawns.FreeColonistsSpawned)
+            {
+                if (pawn.workSettings == null)
+                    continue;
+                foreach (var workType in DefDatabase<WorkTypeDef>.AllDefs)
+                {
+                    if (!pawn.WorkTypeIsDisabled(workType) && pawn.workSettings.GetPriority(workType) == 0)
+                        pawn.workSettings.SetPriority(workType, 3);
+                }
+            }
+            Log.Message("[RimBot] Enabled all work priorities for colonists.");
         }
     }
 

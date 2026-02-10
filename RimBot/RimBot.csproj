@@ -107,6 +107,18 @@
     <Compile Include="Tools\ScanAreaTool.cs" />
     <Compile Include="Tools\FindOnMapTool.cs" />
     <Compile Include="Tools\GetPawnStatusTool.cs" />
+    <Compile Include="Tools\ListWorkPrioritiesTool.cs" />
+    <Compile Include="Tools\SetWorkPriorityTool.cs" />
+    <Compile Include="Tools\ListScheduleTool.cs" />
+    <Compile Include="Tools\SetScheduleTool.cs" />
+    <Compile Include="Tools\ListAnimalsTool.cs" />
+    <Compile Include="Tools\SetAnimalTrainingTool.cs" />
+    <Compile Include="Tools\SetAnimalOperationTool.cs" />
+    <Compile Include="Tools\SetAnimalMasterTool.cs" />
+    <Compile Include="Tools\ListWildlifeTool.cs" />
+    <Compile Include="Tools\SetWildlifeOperationTool.cs" />
+    <Compile Include="Tools\ListResearchTool.cs" />
+    <Compile Include="Tools\SetResearchTool.cs" />
     <Compile Include="SelectionTestWindow.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

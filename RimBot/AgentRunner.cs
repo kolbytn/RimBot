@@ -36,7 +36,7 @@ namespace RimBot
         public static async Task<AgentResult> RunAgent(
             Brain brain, List<ChatMessage> messages, List<ToolDefinition> tools,
             ILanguageModel llm, string model, string apiKey, int maxTokens,
-            ToolContext toolContext)
+            ToolContext toolContext, Action<AgentTurn, int> onTurnComplete = null)
         {
             var conversation = new List<ChatMessage>(messages);
             var result = new AgentResult();
@@ -92,6 +92,7 @@ namespace RimBot
                 if (response.StopReason != StopReason.ToolUse || !hasToolCalls)
                 {
                     result.Turns.Add(turn);
+                    onTurnComplete?.Invoke(turn, i);
                     result.Success = true;
                     result.FinalConversation = conversation;
                     return result;
@@ -114,6 +115,7 @@ namespace RimBot
 
                 turn.ToolResults = toolResults;
                 result.Turns.Add(turn);
+                onTurnComplete?.Invoke(turn, i);
 
                 // 5. Append tool results as user message and loop
                 var resultParts = new List<ContentPart>();

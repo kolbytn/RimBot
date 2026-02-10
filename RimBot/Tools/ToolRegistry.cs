@@ -27,6 +27,20 @@ namespace RimBot.Tools
             Register(new ScanAreaTool());
             Register(new FindOnMapTool());
             Register(new GetPawnStatusTool());
+
+            // Colony management tools
+            Register(new ListWorkPrioritiesTool());
+            Register(new SetWorkPriorityTool());
+            Register(new ListScheduleTool());
+            Register(new SetScheduleTool());
+            Register(new ListAnimalsTool());
+            Register(new SetAnimalTrainingTool());
+            Register(new SetAnimalOperationTool());
+            Register(new SetAnimalMasterTool());
+            Register(new ListWildlifeTool());
+            Register(new SetWildlifeOperationTool());
+            Register(new ListResearchTool());
+            Register(new SetResearchTool());
         }
 
         private static void Register(ITool tool)
