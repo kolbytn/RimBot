@@ -59,6 +59,9 @@ namespace RimBot
             traverse.Field("lastViewRect").SetValue(mapRect);
             traverse.Field("lastViewRectGetFrame").SetValue(Time.frameCount);
 
+            // Suppress ownership overlay during capture so it doesn't appear in screenshots
+            OwnershipTracker.SuppressOverlay = true;
+
             // Wait one frame — RimWorld's normal pipeline runs with the spoofed ViewRect,
             // regenerating all section meshes and drawing them into GPU memory.
             yield return new WaitForEndOfFrame();
@@ -101,7 +104,8 @@ namespace RimBot
                 }
             }
 
-            // Restore camera state
+            // Restore camera state and re-enable overlay
+            OwnershipTracker.SuppressOverlay = false;
             camera.targetTexture = originalTarget;
             camera.transform.position = originalPos;
             camera.orthographicSize = originalOrthoSize;

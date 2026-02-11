@@ -8,6 +8,10 @@ namespace RimBot.Tools
 {
     public class ArchitectOrdersTool : ITool
     {
+        // Static context for ownership tracking (safe: main-thread only execution)
+        private static int currentPawnId;
+        private static Map currentMap;
+
         public string Name => "architect_orders";
 
         public ToolDefinition GetDefinition()
@@ -63,6 +67,8 @@ namespace RimBot.Tools
             var map = context.Map;
             var observerPos = context.PawnPosition;
             var dm = map.designationManager;
+            currentPawnId = context.PawnId;
+            currentMap = map;
 
             int designated = 0;
             int skipped = 0;
@@ -177,7 +183,9 @@ namespace RimBot.Tools
                 return false;
             }
 
-            dm.AddDesignation(new Designation(cell, DesignationDefOf.Mine));
+            var des = new Designation(cell, DesignationDefOf.Mine);
+            dm.AddDesignation(des);
+            RegisterDesignation(des);
             skipReason = null;
             return true;
         }
@@ -195,7 +203,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(plant, DesignationDefOf.HarvestPlant));
+                    var des = new Designation(plant, DesignationDefOf.HarvestPlant);
+                    dm.AddDesignation(des);
+                    RegisterDesignation(des);
                     skipReason = null;
                     return true;
                 }
@@ -216,7 +226,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(plant, DesignationDefOf.CutPlant));
+                    var desCut = new Designation(plant, DesignationDefOf.CutPlant);
+                    dm.AddDesignation(desCut);
+                    RegisterDesignation(desCut);
                     skipReason = null;
                     return true;
                 }
@@ -238,7 +250,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(thing, DesignationDefOf.Haul));
+                    var desHaul = new Designation(thing, DesignationDefOf.Haul);
+                    dm.AddDesignation(desHaul);
+                    RegisterDesignation(desHaul);
                     skipReason = null;
                     return true;
                 }
@@ -250,17 +264,30 @@ namespace RimBot.Tools
         private static bool TryDeconstruct(IntVec3 cell, Map map, DesignationManager dm, out string skipReason)
         {
             var thingList = cell.GetThingList(map);
+            var tracker = OwnershipTracker.Get(map);
             for (int i = 0; i < thingList.Count; i++)
             {
                 var thing = thingList[i];
                 if (thing.def.building != null && thing.Faction == Faction.OfPlayer && !thing.def.mineable)
                 {
+                    // Block deconstructing another bot's building
+                    if (tracker != null)
+                    {
+                        int owner = tracker.GetThingOwner(thing.thingIDNumber);
+                        if (owner >= 0 && owner != currentPawnId)
+                        {
+                            skipReason = "owned by another colonist";
+                            return false;
+                        }
+                    }
                     if (dm.DesignationOn(thing, DesignationDefOf.Deconstruct) != null)
                     {
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(thing, DesignationDefOf.Deconstruct));
+                    var desDecon = new Designation(thing, DesignationDefOf.Deconstruct);
+                    dm.AddDesignation(desDecon);
+                    RegisterDesignation(desDecon);
                     skipReason = null;
                     return true;
                 }
@@ -282,7 +309,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(pawn, DesignationDefOf.Hunt));
+                    var desHunt = new Designation(pawn, DesignationDefOf.Hunt);
+                    dm.AddDesignation(desHunt);
+                    RegisterDesignation(desHunt);
                     skipReason = null;
                     return true;
                 }
@@ -304,7 +333,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(pawn, DesignationDefOf.Tame));
+                    var desTame = new Designation(pawn, DesignationDefOf.Tame);
+                    dm.AddDesignation(desTame);
+                    RegisterDesignation(desTame);
                     skipReason = null;
                     return true;
                 }
@@ -328,7 +359,9 @@ namespace RimBot.Tools
                 return false;
             }
 
-            dm.AddDesignation(new Designation(cell, DesignationDefOf.SmoothFloor));
+            var desSmooth = new Designation(cell, DesignationDefOf.SmoothFloor);
+            dm.AddDesignation(desSmooth);
+            RegisterDesignation(desSmooth);
             skipReason = null;
             return true;
         }
@@ -358,21 +391,33 @@ namespace RimBot.Tools
                 return false;
             }
 
-            dm.AddDesignation(new Designation(cell, DesignationDefOf.SmoothWall));
+            var desSmoothW = new Designation(cell, DesignationDefOf.SmoothWall);
+            dm.AddDesignation(desSmoothW);
+            RegisterDesignation(desSmoothW);
             skipReason = null;
             return true;
         }
 
         private static bool TryCancel(IntVec3 cell, Map map, DesignationManager dm, out string skipReason)
         {
-            // Cancel all designations on cell
+            var tracker = OwnershipTracker.Get(map);
+
+            // Cancel all designations on cell (skip other bots' designations)
             var cellDesigs = dm.AllDesignationsAt(cell);
             bool cancelled = false;
 
             // Copy to list to avoid modification during iteration
             var toRemove = new List<Designation>();
             foreach (var d in cellDesigs)
+            {
+                if (tracker != null)
+                {
+                    int owner = tracker.GetDesignationOwner(d);
+                    if (owner >= 0 && owner != currentPawnId)
+                        continue; // skip other bot's designation
+                }
                 toRemove.Add(d);
+            }
 
             foreach (var d in toRemove)
             {
@@ -382,13 +427,19 @@ namespace RimBot.Tools
 
             // Also cancel thing-based designations on things at this cell
             var thingList = cell.GetThingList(map);
-            for (int i = 0; i < thingList.Count; i++)
+            for (int i = thingList.Count - 1; i >= 0; i--)
             {
                 var thing = thingList[i];
 
-                // Cancel blueprints/frames
+                // Cancel blueprints/frames (skip other bots')
                 if (thing is Blueprint || thing is Frame)
                 {
+                    if (tracker != null)
+                    {
+                        int owner = tracker.GetThingOwner(thing.thingIDNumber);
+                        if (owner >= 0 && owner != currentPawnId)
+                            continue;
+                    }
                     thing.Destroy(DestroyMode.Cancel);
                     cancelled = true;
                     continue;
@@ -397,7 +448,15 @@ namespace RimBot.Tools
                 var thingDesigs = dm.AllDesignationsOn(thing);
                 var thingToRemove = new List<Designation>();
                 foreach (var d in thingDesigs)
+                {
+                    if (tracker != null)
+                    {
+                        int dOwner = tracker.GetDesignationOwner(d);
+                        if (dOwner >= 0 && dOwner != currentPawnId)
+                            continue;
+                    }
                     thingToRemove.Add(d);
+                }
                 foreach (var d in thingToRemove)
                 {
                     dm.RemoveDesignation(d);
@@ -445,7 +504,9 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(thing, DesignationDefOf.Strip));
+                    var desStrip = new Designation(thing, DesignationDefOf.Strip);
+                    dm.AddDesignation(desStrip);
+                    RegisterDesignation(desStrip);
                     skipReason = null;
                     return true;
                 }
@@ -467,13 +528,20 @@ namespace RimBot.Tools
                         skipReason = "already designated";
                         return false;
                     }
-                    dm.AddDesignation(new Designation(thing, DesignationDefOf.Uninstall));
+                    var desUninst = new Designation(thing, DesignationDefOf.Uninstall);
+                    dm.AddDesignation(desUninst);
+                    RegisterDesignation(desUninst);
                     skipReason = null;
                     return true;
                 }
             }
             skipReason = "nothing uninstallable";
             return false;
+        }
+
+        private static void RegisterDesignation(Designation des)
+        {
+            OwnershipTracker.Get(currentMap)?.SetDesignationOwner(des, currentPawnId);
         }
 
         private static void AddSkipReason(Dictionary<string, int> reasons, string reason)

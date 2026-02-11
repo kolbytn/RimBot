@@ -176,7 +176,9 @@ namespace RimBot.Tools
                     continue;
                 }
 
-                GenConstruct.PlaceBlueprintForBuild(buildDef, cell, map, rotation, Faction.OfPlayer, stuffDef);
+                var blueprint = GenConstruct.PlaceBlueprintForBuild(buildDef, cell, map, rotation, Faction.OfPlayer, stuffDef);
+                if (blueprint != null)
+                    OwnershipTracker.Get(map)?.SetThingOwner(blueprint.thingIDNumber, context.PawnId);
                 placed++;
             }
 

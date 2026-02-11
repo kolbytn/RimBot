@@ -143,4 +143,19 @@ namespace RimBot
             Application.runInBackground = true;
         }
     }
+
+    /// <summary>Downgrade specific harmless errors to warnings so they don't force the dev log open.</summary>
+    [HarmonyPatch(typeof(Log), nameof(Log.Error))]
+    public static class SuppressHarmlessErrorsPatch
+    {
+        public static bool Prefix(string text)
+        {
+            if (text != null && text.Contains("zone-incompatible"))
+            {
+                Log.Warning(text);
+                return false;
+            }
+            return true;
+        }
+    }
 }

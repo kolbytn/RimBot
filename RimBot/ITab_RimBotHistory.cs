@@ -211,6 +211,25 @@ namespace RimBot
             GUI.color = Color.white;
             y += 8f;
 
+            // Ownership overlay toggle
+            Text.Font = GameFont.Small;
+            if (brain != null)
+            {
+                bool isHighlighted = OwnershipTracker.IsHighlighted(pawnId);
+                Color pawnColor = OwnershipTracker.GetPawnColor(pawnId);
+
+                // Color swatch
+                Widgets.DrawBoxSolid(new Rect(x, y + 4f, 22f, 22f), pawnColor);
+                Widgets.DrawBox(new Rect(x, y + 4f, 22f, 22f));
+
+                if (Widgets.ButtonText(new Rect(x + 26f, y, width - 26f, 30f),
+                    isHighlighted ? "Hide Ownership" : "Show Ownership"))
+                {
+                    OwnershipTracker.ToggleHighlight(pawnId);
+                }
+                y += 34f;
+            }
+
             // Clear conversation button
             Text.Font = GameFont.Small;
             if (brain != null)

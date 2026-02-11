@@ -266,6 +266,8 @@ namespace RimBot
                 Log.Message("[RimBot] Removed brain for pawn " + id);
                 brains.Remove(id);
                 comp.ClearAssignment(id);
+                foreach (var map in Find.Maps)
+                    OwnershipTracker.Get(map)?.ReleaseAll(id);
             }
 
             // Get enabled profiles (those with API keys)

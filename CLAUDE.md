@@ -156,7 +156,7 @@ LLM network calls run on background threads via `Task.Run`. All Unity/RimWorld A
 ## Key Conventions
 
 - Namespace: `RimBot` (tools under `RimBot.Tools`, models under `RimBot.Models`)
-- Logging: `Log.Message("[RimBot] ...")`, `Log.Warning(...)`, `Log.Error(...)` from `Verse`
+- Logging: `Log.Message("[RimBot] ...")` and `Log.Warning(...)` from `Verse`. **Never use `Log.Error`** — use `Log.Warning` instead for error conditions.
 - Harmony patches: `[HarmonyPatch]` attributes, auto-discovered by `PatchAll()`
 - RimWorld APIs: `Verse` and `RimWorld` namespaces
 - New tools: implement `ITool`, register in `ToolRegistry.Initialize()`

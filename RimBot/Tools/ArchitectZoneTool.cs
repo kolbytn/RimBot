@@ -92,17 +92,19 @@ namespace RimBot.Tools
                 return;
             }
 
+            int pawnId = context.PawnId;
+
             string resultMsg;
             switch (zoneType)
             {
                 case "growing_zone":
-                    resultMsg = CreateOrExpandGrowingZone(map, cells);
+                    resultMsg = CreateOrExpandGrowingZone(map, cells, pawnId);
                     break;
                 case "stockpile":
-                    resultMsg = CreateOrExpandStockpile(map, cells, false);
+                    resultMsg = CreateOrExpandStockpile(map, cells, false, pawnId);
                     break;
                 case "dumping_stockpile":
-                    resultMsg = CreateOrExpandStockpile(map, cells, true);
+                    resultMsg = CreateOrExpandStockpile(map, cells, true, pawnId);
                     break;
                 case "expand_home":
                     resultMsg = SetArea(map, cells, map.areaManager.Home, true);
@@ -117,7 +119,7 @@ namespace RimBot.Tools
                     resultMsg = SetArea(map, cells, map.areaManager.NoRoof, true);
                     break;
                 case "delete_zone":
-                    resultMsg = DeleteZones(map, cells);
+                    resultMsg = DeleteZones(map, cells, pawnId);
                     break;
                 default:
                     resultMsg = "Unknown zone_type '" + zoneType + "'.";
@@ -145,18 +147,19 @@ namespace RimBot.Tools
             });
         }
 
-        private static string CreateOrExpandGrowingZone(Map map, List<IntVec3> cells)
+        private static string CreateOrExpandGrowingZone(Map map, List<IntVec3> cells, int pawnId)
         {
             var zm = map.zoneManager;
+            var tracker = OwnershipTracker.Get(map);
             int added = 0;
             int skipped = 0;
 
-            // Try to find an existing growing zone at or adjacent to cells
+            // Try to find an existing growing zone at or adjacent to cells (skip other bots' zones)
             Zone_Growing existingZone = null;
             foreach (var cell in cells)
             {
                 var z = zm.ZoneAt(cell) as Zone_Growing;
-                if (z != null)
+                if (z != null && IsOwnOrUnowned(tracker, z.ID, pawnId))
                 {
                     existingZone = z;
                     break;
@@ -173,7 +176,7 @@ namespace RimBot.Tools
                         if (adjCell.InBounds(map))
                         {
                             var z = zm.ZoneAt(adjCell) as Zone_Growing;
-                            if (z != null)
+                            if (z != null && IsOwnOrUnowned(tracker, z.ID, pawnId))
                             {
                                 existingZone = z;
                                 break;
@@ -188,6 +191,7 @@ namespace RimBot.Tools
             {
                 existingZone = new Zone_Growing(zm);
                 zm.RegisterZone(existingZone);
+                tracker?.SetZoneOwner(existingZone.ID, pawnId);
             }
 
             foreach (var cell in cells)
@@ -204,18 +208,19 @@ namespace RimBot.Tools
             return "Added " + added + " cells to growing zone '" + existingZone.label + "'. " + skipped + " skipped (already zoned).";
         }
 
-        private static string CreateOrExpandStockpile(Map map, List<IntVec3> cells, bool isDumping)
+        private static string CreateOrExpandStockpile(Map map, List<IntVec3> cells, bool isDumping, int pawnId)
         {
             var zm = map.zoneManager;
+            var tracker = OwnershipTracker.Get(map);
             int added = 0;
             int skipped = 0;
 
-            // Try to find existing stockpile at or adjacent to cells
+            // Try to find existing stockpile at or adjacent to cells (skip other bots' zones)
             Zone_Stockpile existingZone = null;
             foreach (var cell in cells)
             {
                 var z = zm.ZoneAt(cell) as Zone_Stockpile;
-                if (z != null)
+                if (z != null && IsOwnOrUnowned(tracker, z.ID, pawnId))
                 {
                     existingZone = z;
                     break;
@@ -232,7 +237,7 @@ namespace RimBot.Tools
                         if (adjCell.InBounds(map))
                         {
                             var z = zm.ZoneAt(adjCell) as Zone_Stockpile;
-                            if (z != null)
+                            if (z != null && IsOwnOrUnowned(tracker, z.ID, pawnId))
                             {
                                 existingZone = z;
                                 break;
@@ -248,6 +253,7 @@ namespace RimBot.Tools
                 var preset = isDumping ? StorageSettingsPreset.DumpingStockpile : StorageSettingsPreset.DefaultStockpile;
                 existingZone = new Zone_Stockpile(preset, zm);
                 zm.RegisterZone(existingZone);
+                tracker?.SetZoneOwner(existingZone.ID, pawnId);
             }
 
             foreach (var cell in cells)
@@ -285,12 +291,14 @@ namespace RimBot.Tools
             return action + " " + changed + " cells in " + area.Label + ". " + skipped + " already " + action + ".";
         }
 
-        private static string DeleteZones(Map map, List<IntVec3> cells)
+        private static string DeleteZones(Map map, List<IntVec3> cells, int pawnId)
         {
             var zm = map.zoneManager;
+            var tracker = OwnershipTracker.Get(map);
             var deletedZones = new HashSet<Zone>();
             int cellsAffected = 0;
             int noZone = 0;
+            int blockedByOwner = 0;
 
             foreach (var cell in cells)
             {
@@ -303,14 +311,29 @@ namespace RimBot.Tools
 
                 if (!deletedZones.Contains(zone))
                 {
+                    if (!IsOwnOrUnowned(tracker, zone.ID, pawnId))
+                    {
+                        blockedByOwner++;
+                        continue;
+                    }
                     cellsAffected += zone.Cells.Count;
                     zone.Delete();
                     deletedZones.Add(zone);
                 }
             }
 
-            return "Deleted " + deletedZones.Count + " zone(s) covering " + cellsAffected + " cells. " +
+            var result = "Deleted " + deletedZones.Count + " zone(s) covering " + cellsAffected + " cells. " +
                 noZone + " cells had no zone.";
+            if (blockedByOwner > 0)
+                result += " " + blockedByOwner + " zone(s) skipped (owned by another colonist).";
+            return result;
+        }
+
+        private static bool IsOwnOrUnowned(OwnershipTracker tracker, int zoneId, int pawnId)
+        {
+            if (tracker == null) return true;
+            int owner = tracker.GetZoneOwner(zoneId);
+            return owner < 0 || owner == pawnId;
         }
     }
 }
