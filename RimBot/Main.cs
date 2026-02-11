@@ -144,6 +144,17 @@ namespace RimBot
         }
     }
 
+    /// <summary>Remove all work type restrictions for player colonists so every pawn can do every job.</summary>
+    [HarmonyPatch(typeof(Pawn), nameof(Pawn.CombinedDisabledWorkTags), MethodType.Getter)]
+    public static class DisableWorkRestrictionsPatch
+    {
+        public static void Postfix(Pawn __instance, ref WorkTags __result)
+        {
+            if (__instance.Faction != null && __instance.Faction.IsPlayer && __instance.RaceProps.Humanlike)
+                __result = WorkTags.None;
+        }
+    }
+
     /// <summary>Downgrade specific harmless errors to warnings so they don't force the dev log open.</summary>
     [HarmonyPatch(typeof(Log), nameof(Log.Error))]
     public static class SuppressHarmlessErrorsPatch

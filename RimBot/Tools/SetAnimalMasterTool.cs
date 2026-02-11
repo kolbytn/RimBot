@@ -69,6 +69,20 @@ namespace RimBot.Tools
 
             string animalLabel = animal.Name != null ? animal.Name.ToStringShort : animal.def.label;
 
+            // Check if animal is managed by a different colonist
+            string existingMaster;
+            if (SetAnimalTrainingTool.HasDifferentMaster(animal, context.PawnId, out existingMaster))
+            {
+                onComplete(new ToolResult
+                {
+                    ToolCallId = call.Id,
+                    ToolName = Name,
+                    Success = false,
+                    Content = animalLabel + " is managed by " + existingMaster + ". You cannot modify animals assigned to other colonists."
+                });
+                return;
+            }
+
             if (masterName.ToLower() == "none")
             {
                 animal.playerSettings.Master = null;

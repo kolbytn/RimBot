@@ -58,6 +58,21 @@ namespace RimBot.Tools
                 return;
             }
 
+            // Check if animal is managed by a different colonist
+            string existingMaster;
+            if (HasDifferentMaster(animal, context.PawnId, out existingMaster))
+            {
+                string aLabel = animal.Name != null ? animal.Name.ToStringShort : animal.def.label;
+                onComplete(new ToolResult
+                {
+                    ToolCallId = call.Id,
+                    ToolName = Name,
+                    Success = false,
+                    Content = aLabel + " is managed by " + existingMaster + ". You cannot modify animals assigned to other colonists."
+                });
+                return;
+            }
+
             // Find trainable def
             TrainableDef trainDef = null;
             string lowerTrainable = trainableName.ToLower();
@@ -108,6 +123,21 @@ namespace RimBot.Tools
                 Success = true,
                 Content = action.Substring(0, 1).ToUpper() + action.Substring(1) + " " + trainDef.label + " training for " + label + "."
             });
+        }
+
+        /// <summary>
+        /// Returns true if the animal has a master that is not the calling pawn.
+        /// </summary>
+        internal static bool HasDifferentMaster(Pawn animal, int callingPawnId, out string masterName)
+        {
+            masterName = null;
+            if (animal.playerSettings == null || animal.playerSettings.Master == null)
+                return false;
+            var master = animal.playerSettings.Master;
+            if (master.thingIDNumber == callingPawnId)
+                return false;
+            masterName = master.LabelShort;
+            return true;
         }
 
         internal static Pawn FindAnimalByName(Map map, string name)

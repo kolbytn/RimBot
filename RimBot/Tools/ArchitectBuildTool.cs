@@ -150,6 +150,42 @@ namespace RimBot.Tools
             var map = context.Map;
             var observerPos = context.PawnPosition;
 
+            // Pre-check all cells for ownership conflicts before placing anything
+            var tracker = OwnershipTracker.Get(map);
+            if (tracker != null)
+            {
+                IntVec2 buildSize = thingDef != null ? thingDef.size : new IntVec2(1, 1);
+                foreach (var coordObj in coordsArray)
+                {
+                    int cx = coordObj["x"]?.Value<int>() ?? 0;
+                    int cz = coordObj["z"]?.Value<int>() ?? 0;
+                    var cell = new IntVec3(observerPos.x + cx, 0, observerPos.z + cz);
+                    if (!cell.InBounds(map)) continue;
+
+                    var occupiedRect = GenAdj.OccupiedRect(cell, rotation, buildSize);
+                    foreach (var occCell in occupiedRect)
+                    {
+                        int conflictOwner = tracker.GetCellConflictOwner(occCell, context.PawnId);
+                        if (conflictOwner >= 0)
+                        {
+                            var ownerPawn = BrainManager.FindPawnById(conflictOwner);
+                            string ownerName = ownerPawn != null ? ownerPawn.LabelShort : "another colonist";
+                            onComplete(new ToolResult
+                            {
+                                ToolCallId = call.Id,
+                                ToolName = Name,
+                                Success = false,
+                                Content = "Cannot build here: the area at relative (" + cx + "," + cz +
+                                    ") intersects with a structure or zone belonging to " + ownerName +
+                                    ". You cannot build in areas claimed by other colonists. " +
+                                    "Use get_screenshot to see the current state of the area."
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+
             int placed = 0;
             int skipped = 0;
             var skipReasons = new Dictionary<string, int>();
@@ -163,6 +199,26 @@ namespace RimBot.Tools
                 if (!cell.InBounds(map))
                 {
                     AddSkipReason(skipReasons, "out of bounds");
+                    skipped++;
+                    continue;
+                }
+
+                // Check for existing blueprint/frame of the same def (prevents duplicates and build spam)
+                bool alreadyQueued = false;
+                var existingThings = cell.GetThingList(map);
+                for (int j = 0; j < existingThings.Count; j++)
+                {
+                    var existing = existingThings[j];
+                    if ((existing is Blueprint || existing is Frame) &&
+                        existing.def.entityDefToBuild == buildDef)
+                    {
+                        alreadyQueued = true;
+                        break;
+                    }
+                }
+                if (alreadyQueued)
+                {
+                    AddSkipReason(skipReasons, "already in progress");
                     skipped++;
                     continue;
                 }

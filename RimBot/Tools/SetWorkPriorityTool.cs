@@ -14,11 +14,9 @@ namespace RimBot.Tools
             return new ToolDefinition
             {
                 Name = Name,
-                Description = "Set a colonist's priority for a specific work type. " +
-                    "Priority 0 disables the work type, 1 is highest priority, 4 is lowest. " +
-                    "Omit pawn_name to set your own priority.",
+                Description = "Set your own priority for a specific work type. " +
+                    "Priority 0 disables the work type, 1 is highest priority, 4 is lowest.",
                 ParametersJson = "{\"type\":\"object\",\"properties\":{" +
-                    "\"pawn_name\":{\"type\":\"string\",\"description\":\"Colonist name (omit to set your own)\"}," +
                     "\"work_type\":{\"type\":\"string\",\"description\":\"Work type name (e.g. Mining, Cooking, Construction, Growing, etc.)\"}," +
                     "\"priority\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4,\"description\":\"Priority level: 0=disabled, 1=highest, 4=lowest\"}}" +
                     ",\"required\":[\"work_type\",\"priority\"]}"
@@ -27,10 +25,6 @@ namespace RimBot.Tools
 
         public void Execute(ToolCall call, ToolContext context, Action<ToolResult> onComplete)
         {
-            string pawnName = null;
-            if (call.Arguments != null && call.Arguments["pawn_name"] != null)
-                pawnName = call.Arguments["pawn_name"].Value<string>();
-
             string workTypeName = call.Arguments["work_type"]?.Value<string>();
             if (string.IsNullOrEmpty(workTypeName))
             {
@@ -57,31 +51,9 @@ namespace RimBot.Tools
                 return;
             }
 
-            var map = context.Map;
-            Pawn pawn;
+            Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] set_work_priority(" + workTypeName + ", " + priority + ")");
 
-            if (string.IsNullOrEmpty(pawnName))
-            {
-                pawn = BrainManager.FindPawnById(context.PawnId);
-                Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] set_work_priority(self, " + workTypeName + ", " + priority + ")");
-            }
-            else
-            {
-                Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] set_work_priority(" + pawnName + ", " + workTypeName + ", " + priority + ")");
-                pawn = ListWorkPrioritiesTool.FindColonistByName(map, pawnName);
-                if (pawn == null)
-                {
-                    onComplete(new ToolResult
-                    {
-                        ToolCallId = call.Id,
-                        ToolName = Name,
-                        Success = false,
-                        Content = "No colonist named '" + pawnName + "'. Available: " + ListWorkPrioritiesTool.GetColonistNames(map)
-                    });
-                    return;
-                }
-            }
-
+            var pawn = BrainManager.FindPawnById(context.PawnId);
             if (pawn == null || !pawn.Spawned)
             {
                 onComplete(new ToolResult

@@ -21,6 +21,7 @@ namespace RimBot
             public IntVec3 CenterCell;
             public float CameraSize;
             public int PixelSize;
+            public int PawnId;
             public List<PawnLabel> Labels;
         }
 
@@ -83,6 +84,7 @@ namespace RimBot
                     camera.targetTexture = originalTarget;
 
                     RenderTexture.active = rt;
+                    DrawOwnershipOverlay(req, map);
                     if (req.Labels != null && req.Labels.Count > 0)
                         DrawLabels(req);
 
@@ -114,6 +116,63 @@ namespace RimBot
 
             onComplete?.Invoke(results);
         }
+        private static void DrawOwnershipOverlay(CaptureRequest req, Map map)
+        {
+            if (req.PawnId <= 0) return;
+
+            var tracker = OwnershipTracker.Get(map);
+            if (tracker == null) return;
+
+            int halfSize = (int)req.CameraSize + 1;
+            CellRect viewRect = new CellRect(
+                req.CenterCell.x - halfSize, req.CenterCell.z - halfSize,
+                halfSize * 2, halfSize * 2);
+            viewRect.ClipInsideMap(map);
+
+            var cells = new List<IntVec3>();
+            tracker.GetOtherBotCells(req.PawnId, viewRect, cells);
+            if (cells.Count == 0) return;
+
+            float viewSize = req.CameraSize * 2f;
+            float size = req.PixelSize;
+            Vector3 center = req.CenterCell.ToVector3Shifted();
+            float tilePixels = size / viewSize;
+
+            if (bgMaterial == null)
+            {
+                bgMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+                bgMaterial.hideFlags = HideFlags.HideAndDontSave;
+                bgMaterial.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+                bgMaterial.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                bgMaterial.SetInt("_Cull", 0);
+                bgMaterial.SetInt("_ZWrite", 0);
+                bgMaterial.SetInt("_ZTest", (int)CompareFunction.Always);
+            }
+
+            GL.PushMatrix();
+            GL.LoadPixelMatrix(0, size, size, 0);
+
+            bgMaterial.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(new Color(1f, 0f, 0f, 0.35f));
+
+            foreach (var cell in cells)
+            {
+                float worldX = cell.x + 0.5f;
+                float worldZ = cell.z + 0.5f;
+                float px = (worldX - center.x) / viewSize * size + size / 2f;
+                float py = (center.z - worldZ) / viewSize * size + size / 2f;
+
+                GL.Vertex3(px - tilePixels / 2f, py - tilePixels / 2f, 0);
+                GL.Vertex3(px + tilePixels / 2f, py - tilePixels / 2f, 0);
+                GL.Vertex3(px + tilePixels / 2f, py + tilePixels / 2f, 0);
+                GL.Vertex3(px - tilePixels / 2f, py + tilePixels / 2f, 0);
+            }
+
+            GL.End();
+            GL.PopMatrix();
+        }
+
         private static void DrawLabels(CaptureRequest req)
         {
             if (labelFont == null)

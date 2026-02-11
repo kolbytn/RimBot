@@ -38,7 +38,8 @@ namespace RimBot.Tools
                 {
                     CenterCell = context.PawnPosition,
                     CameraSize = size,
-                    PixelSize = 512
+                    PixelSize = 512,
+                    PawnId = context.PawnId
                 }
             };
 
@@ -56,7 +57,8 @@ namespace RimBot.Tools
                         Success = true,
                         Content = "Screenshot captured. The image shows a " + (size * 2) + "x" + (size * 2) +
                             " tile area centered on your position. You are at the center. " +
-                            "+X is east (right), +Z is north (up). Coordinates relative to you at (0,0).",
+                            "+X is east (right), +Z is north (up). Coordinates relative to you at (0,0). " +
+                            "Areas highlighted in red belong to other colonists — do not build, zone, or place orders there.",
                         ImageBase64 = base64,
                         ImageMediaType = "image/png"
                     });

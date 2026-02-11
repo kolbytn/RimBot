@@ -272,6 +272,74 @@ namespace RimBot
             return mat;
         }
 
+        // --- Conflict detection ---
+
+        /// <summary>
+        /// Collects all cells within viewRect that belong to zones, blueprints, frames, or
+        /// structures owned by a bot other than pawnId.
+        /// </summary>
+        public void GetOtherBotCells(int pawnId, CellRect viewRect, List<IntVec3> cells)
+        {
+            // Zones
+            var zones = map.zoneManager.AllZones;
+            for (int i = 0; i < zones.Count; i++)
+            {
+                int owner;
+                if (zoneOwners.TryGetValue(zones[i].ID, out owner) && owner != pawnId)
+                {
+                    foreach (var cell in zones[i].Cells)
+                    {
+                        if (viewRect.Contains(cell))
+                            cells.Add(cell);
+                    }
+                }
+            }
+
+            // Things (blueprints, frames, buildings)
+            var things = map.listerThings.AllThings;
+            for (int i = 0; i < things.Count; i++)
+            {
+                var t = things[i];
+                int owner;
+                if (!thingOwners.TryGetValue(t.thingIDNumber, out owner) || owner == pawnId)
+                    continue;
+                if (!(t is Blueprint) && !(t is Frame) && (t.def.building == null))
+                    continue;
+
+                var rect = t.OccupiedRect();
+                foreach (var cell in rect)
+                {
+                    if (viewRect.Contains(cell))
+                        cells.Add(cell);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks if a cell has a zone or thing owned by a different bot.
+        /// Returns the conflicting owner pawn ID, or -1 if no conflict.
+        /// </summary>
+        public int GetCellConflictOwner(IntVec3 cell, int pawnId)
+        {
+            var zone = map.zoneManager.ZoneAt(cell);
+            if (zone != null)
+            {
+                int zoneOwner = GetZoneOwner(zone.ID);
+                if (zoneOwner >= 0 && zoneOwner != pawnId)
+                    return zoneOwner;
+            }
+
+            var things = cell.GetThingList(map);
+            for (int i = 0; i < things.Count; i++)
+            {
+                int thingOwner = GetThingOwner(things[i].thingIDNumber);
+                if (thingOwner >= 0 && thingOwner != pawnId)
+                    return thingOwner;
+            }
+
+            return -1;
+        }
+
         // --- Helpers ---
 
         private static int GetDesignationKey(Designation d)

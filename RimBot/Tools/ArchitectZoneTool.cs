@@ -94,6 +94,37 @@ namespace RimBot.Tools
 
             int pawnId = context.PawnId;
 
+            // For zone creation/expansion, check for ownership conflicts before any modifications
+            if (zoneType == "growing_zone" || zoneType == "stockpile" || zoneType == "dumping_stockpile")
+            {
+                var tracker = OwnershipTracker.Get(map);
+                if (tracker != null)
+                {
+                    foreach (var cell in cells)
+                    {
+                        int conflictOwner = tracker.GetCellConflictOwner(cell, pawnId);
+                        if (conflictOwner >= 0)
+                        {
+                            var ownerPawn = BrainManager.FindPawnById(conflictOwner);
+                            string ownerName = ownerPawn != null ? ownerPawn.LabelShort : "another colonist";
+                            int relX = cell.x - observerPos.x;
+                            int relZ = cell.z - observerPos.z;
+                            onComplete(new ToolResult
+                            {
+                                ToolCallId = call.Id,
+                                ToolName = Name,
+                                Success = false,
+                                Content = "Cannot create/expand zone: cell at relative (" + relX + "," + relZ +
+                                    ") intersects with a structure or zone belonging to " + ownerName +
+                                    ". You cannot place zones in areas claimed by other colonists. " +
+                                    "Use get_screenshot to see the current state of the area."
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+
             string resultMsg;
             switch (zoneType)
             {

@@ -11,23 +11,44 @@ namespace RimBot
     [HarmonyPatch(typeof(Blueprint), nameof(Blueprint.TryReplaceWithSolidThing))]
     public static class BlueprintToFramePatch
     {
-        private static int capturedId;
         private static Map capturedMap;
+        private static IntVec3 capturedPos;
         private static int capturedOwner;
 
         public static void Prefix(Blueprint __instance)
         {
-            capturedId = __instance.thingIDNumber;
             capturedMap = __instance.Map;
+            capturedPos = __instance.Position;
             // Capture owner now — ThingDestroyPatch will remove it from the dict during this method
-            capturedOwner = OwnershipTracker.Get(capturedMap)?.GetThingOwner(capturedId) ?? -1;
+            capturedOwner = OwnershipTracker.Get(capturedMap)?.GetThingOwner(__instance.thingIDNumber) ?? -1;
         }
 
         public static void Postfix(bool __result, Thing createdThing)
         {
-            if (!__result || createdThing == null || capturedMap == null || capturedOwner < 0)
+            if (!__result || capturedMap == null || capturedOwner < 0)
                 return;
-            OwnershipTracker.Get(capturedMap)?.SetThingOwner(createdThing.thingIDNumber, capturedOwner);
+
+            var tracker = OwnershipTracker.Get(capturedMap);
+            if (tracker == null)
+                return;
+
+            // Use createdThing if Harmony captured the out parameter
+            if (createdThing != null)
+            {
+                tracker.SetThingOwner(createdThing.thingIDNumber, capturedOwner);
+                return;
+            }
+
+            // Fallback: search by position for a Frame (out parameter capture can be unreliable)
+            var things = capturedPos.GetThingList(capturedMap);
+            for (int i = 0; i < things.Count; i++)
+            {
+                if (things[i] is Frame frame)
+                {
+                    tracker.SetThingOwner(frame.thingIDNumber, capturedOwner);
+                    return;
+                }
+            }
         }
     }
 
@@ -38,6 +59,7 @@ namespace RimBot
         private static Map capturedMap;
         private static IntVec3 capturedPos;
         private static int capturedOwner;
+        private static BuildableDef capturedBuildDef;
 
         public static void Prefix(Frame __instance)
         {
@@ -45,6 +67,7 @@ namespace RimBot
             capturedMap = __instance.Map;
             capturedPos = __instance.Position;
             capturedOwner = OwnershipTracker.Get(capturedMap)?.GetThingOwner(capturedId) ?? -1;
+            capturedBuildDef = __instance.def.entityDefToBuild;
         }
 
         public static void Postfix(Pawn worker)
@@ -58,23 +81,42 @@ namespace RimBot
 
             // Find the newly built thing at the captured position
             var things = capturedPos.GetThingList(capturedMap);
+
+            // Primary: match by the def that was being built
+            if (capturedBuildDef != null)
+            {
+                for (int i = 0; i < things.Count; i++)
+                {
+                    if (things[i].def == capturedBuildDef)
+                    {
+                        tracker.SetThingOwner(things[i].thingIDNumber, capturedOwner);
+                        AutoAssignBed(things[i]);
+                        return;
+                    }
+                }
+            }
+
+            // Fallback: any new building at this position
             for (int i = 0; i < things.Count; i++)
             {
                 var t = things[i];
                 if (t.def.building != null && t.thingIDNumber != capturedId)
                 {
                     tracker.SetThingOwner(t.thingIDNumber, capturedOwner);
-
-                    // Auto-assign bed to building pawn
-                    var bed = t as Building_Bed;
-                    if (bed != null && !bed.Medical)
-                    {
-                        var ownerPawn = BrainManager.FindPawnById(capturedOwner);
-                        if (ownerPawn != null)
-                            ownerPawn.ownership.ClaimBedIfNonMedical(bed);
-                    }
+                    AutoAssignBed(t);
                     return;
                 }
+            }
+        }
+
+        private static void AutoAssignBed(Thing t)
+        {
+            var bed = t as Building_Bed;
+            if (bed != null && !bed.Medical)
+            {
+                var ownerPawn = BrainManager.FindPawnById(capturedOwner);
+                if (ownerPawn != null)
+                    ownerPawn.ownership.ClaimBedIfNonMedical(bed);
             }
         }
     }
@@ -121,6 +163,8 @@ namespace RimBot
         /// </summary>
         public static bool AllowJobOnThing(Pawn pawn, Thing t)
         {
+            if (pawn == null || t == null || pawn.Map == null)
+                return true;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null)
                 return true; // not a bot — always allowed
             int owner = OwnershipTracker.Get(pawn.Map)?.GetThingOwner(t.thingIDNumber) ?? -1;
@@ -132,6 +176,8 @@ namespace RimBot
         /// </summary>
         public static bool AllowJobOnZoneCell(Pawn pawn, IntVec3 c)
         {
+            if (pawn == null || pawn.Map == null)
+                return true;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null)
                 return true;
             var zone = pawn.Map.zoneManager.ZoneAt(c);
@@ -146,6 +192,8 @@ namespace RimBot
         /// </summary>
         public static bool AllowDesignationOnThing(Pawn pawn, Thing t, DesignationDef desDef)
         {
+            if (pawn == null || t == null || pawn.Map == null)
+                return true;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null)
                 return true;
             var des = pawn.Map.designationManager.DesignationOn(t, desDef);
@@ -160,6 +208,8 @@ namespace RimBot
         /// </summary>
         public static bool AllowDesignationAtCell(Pawn pawn, IntVec3 c, DesignationDef desDef)
         {
+            if (pawn == null || pawn.Map == null)
+                return true;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null)
                 return true;
             var des = pawn.Map.designationManager.DesignationAt(c, desDef);
@@ -381,17 +431,38 @@ namespace RimBot
         }
     }
 
-    // Prevent bots from hauling to other bots' stockpile zones
+    // Prevent bots from hauling to/from other bots' stockpile zones
     [HarmonyPatch(typeof(WorkGiver_HaulGeneral), "JobOnThing")]
     public static class FilterHaulGeneralPatch
     {
-        public static void Postfix(Pawn pawn, ref Job __result)
+        public static void Postfix(Pawn pawn, Thing t, ref Job __result)
         {
             if (__result == null) return;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
-            if (!__result.targetB.IsValid) return;
 
-            if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, __result.targetB.Cell))
+            // Don't pick up items from another bot's zone
+            if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, t.Position))
+            {
+                __result = null;
+                return;
+            }
+
+            // Don't haul to another bot's zone
+            if (__result.targetB.IsValid && !OwnershipFilterHelper.AllowJobOnZoneCell(pawn, __result.targetB.Cell))
+                __result = null;
+        }
+    }
+
+    // Prevent bots from merging stacks in other bots' stockpile zones
+    [HarmonyPatch(typeof(WorkGiver_Merge), "JobOnThing")]
+    public static class FilterMergePatch
+    {
+        public static void Postfix(Pawn pawn, Thing t, ref Job __result)
+        {
+            if (__result == null) return;
+            if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
+
+            if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, t.Position))
                 __result = null;
         }
     }

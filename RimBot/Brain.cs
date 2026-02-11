@@ -113,6 +113,7 @@ namespace RimBot
                     "Use architect_orders for mining, harvesting, hauling, hunting, deconstructing, and more. " +
                     "Use architect_zone for stockpiles, growing zones, and area management. " +
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
+                    "Areas highlighted in red in screenshots belong to other colonists — do not build, zone, or place orders in red areas. " +
                     "Build rooms, expand the colony, and make decisions as you see fit.";
 
                 agentConversation = new List<ChatMessage>
