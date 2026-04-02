@@ -21,6 +21,10 @@ dotnet build RimBot.slnx
 - `msbuild` is not on PATH in this shell; always use `dotnet build`
 - .NET 4.7.2 does **not** support TLS 1.3 — use `Tls12` only
 
+## Git Workflow
+
+- **NEVER commit or push without the user explicitly asking.** Stage and diff changes to review them, but wait for instruction before committing.
+
 ## Temporary Files
 
 Store all temporary files (saved logs, test artifacts, etc.) in the `tmp/` directory at the project root. This directory is git-ignored. **Do not use `/tmp` or the system temp directory** — use `tmp/` in the project so files are easy to find and clean up.
