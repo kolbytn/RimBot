@@ -272,9 +272,12 @@ Observations from automated test runs (Gemini 3 Flash, single bot, 5-minute sess
 ### Behavioral Improvements
 
 - [ ] **Research never progresses** — All 3 test runs set research to "battery" but it stayed at 0%. The research bench may not be completed, or the colonist never gets assigned to research work. Investigate whether the bench is actually built and whether work priorities are set correctly.
-- [x] **PackagedSurvivalMeal defName unknown** — Bots consistently fail to find survival meals because they guess longer names. Fixed: bidirectional fuzzy matching in `FindOnMapTool` with 70% length ratio threshold. Not yet verified in a run where a bot searches for survival meals (no test run triggered it).
+- [x] **PackagedSurvivalMeal defName unknown** — Bots consistently fail to find survival meals because they guess longer names. Fixed: forward-only fuzzy matching in `FindOnMapTool`. Not yet verified in a run where a bot searches for survival meals (no test run triggered it).
 - [ ] **Battery always chosen as research** — Every run picks "battery" as the first research project. Could be fine, but might indicate the bot isn't evaluating research options strategically. Consider whether the context should suggest high-impact early-game research.
 - [ ] **Incapable colonists can't execute plans** — If a colonist is incapable of Construction, they blueprint buildings that never get built. The bot doesn't detect this. Fix: warn in context if the colonist is incapable of key work types, or check before issuing build orders.
+- [ ] **Wildlife name mismatch** — `set_wildlife_operation` fails when bot uses names like "Doe 14041" or "Gazelle 58284" from scan results. The tool expects species names, not individual labels. Either the tool should accept individual labels or scan_area should show the format the tool expects.
+- [ ] **"Medical" work type not matched** — Bot says "Medical" but work type is "doctor". Gerund stripping doesn't help here since it's a synonym, not a suffix variant. May need a synonym map.
+- [ ] **"HorseshoePin" vs "HorseshoesPin"** — Bot guesses wrong defName for horseshoes. Minor but shows LLM defName guessing is still unreliable for less common items.
 
 ### Metrics Baselines (Gemini 3 Flash, 1 bot, 5 min)
 
