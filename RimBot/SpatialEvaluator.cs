@@ -111,6 +111,97 @@ namespace RimBot
                 }
             }
 
+            // Check for blocked doors — any door/door blueprint with impassable things on either side
+            int blockedDoors = 0;
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing.Faction != Faction.OfPlayer) continue;
+
+                bool isDoor = false;
+                if (thing.def.IsDoor) isDoor = true;
+                else if (thing is Blueprint dbp && dbp.def.entityDefToBuild is ThingDef ddef && ddef.IsDoor) isDoor = true;
+                else if (thing is Frame dfr && dfr.def.entityDefToBuild is ThingDef ddef2 && ddef2.IsDoor) isDoor = true;
+
+                if (!isDoor) continue;
+
+                // Check cells on both sides of the door (the passthrough cells)
+                // Doors are 1x1. Pawns pass through adjacent cardinal cells.
+                foreach (var adj in GenAdj.CardinalDirections)
+                {
+                    var adjCell = thing.Position + adj;
+                    if (!adjCell.InBounds(map)) continue;
+                    foreach (var adjThing in adjCell.GetThingList(map))
+                    {
+                        if (adjThing == thing) continue;
+                        // Check for impassable buildings, blueprints, or frames blocking the door
+                        bool blocking = false;
+                        if (adjThing.def.passability == Traversability.Impassable) blocking = true;
+                        else if (adjThing is Blueprint abp)
+                        {
+                            var adef = abp.def.entityDefToBuild as ThingDef;
+                            if (adef != null && adef.passability == Traversability.Impassable) blocking = true;
+                            // Furniture like tables also blocks doors functionally
+                            if (adef != null && adef.building != null && adef.fillPercent > 0.3f) blocking = true;
+                        }
+                        if (blocking)
+                        {
+                            blockedDoors++;
+                            warnings.Add("Door at (" + thing.Position.x + "," + thing.Position.z +
+                                ") blocked by " + (adjThing is Blueprint bp2
+                                    ? (bp2.def.entityDefToBuild?.label ?? "blueprint")
+                                    : adjThing.def.label) +
+                                " at (" + adjCell.x + "," + adjCell.z + ")");
+                            break;
+                        }
+                    }
+                    if (blockedDoors > 0) break; // only report once per door
+                }
+            }
+
+            // Check for double-thick walls — walls with a parallel wall directly adjacent
+            // on the interior side (making a 2-wide wall that wastes resources)
+            int doubleThickWalls = 0;
+            var wallDef = DefDatabase<ThingDef>.GetNamed("Wall", false);
+            if (wallDef != null)
+            {
+                foreach (var building in map.listerBuildings.allBuildingsColonist)
+                {
+                    if (building == null || !building.Spawned) continue;
+                    if (building.def != wallDef) continue;
+
+                    // A wall is "double thick" if it has walls on both sides along the same axis
+                    // and both outer cells are non-wall (meaning it's a wall pair, not a long wall line)
+                    var pos = building.Position;
+                    // Check east-west axis
+                    bool wallEast = HasWallAt(map, pos + IntVec3.East);
+                    bool wallWest = HasWallAt(map, pos + IntVec3.West);
+                    bool wallNorth = HasWallAt(map, pos + IntVec3.North);
+                    bool wallSouth = HasWallAt(map, pos + IntVec3.South);
+
+                    // Double-thick: wall on one side but NOT the opposite (it's a parallel pair, not a corner)
+                    // We detect by checking if a wall has exactly one neighbor on an axis and that neighbor
+                    // also has a wall beyond it — meaning 3+ walls in a line, which is fine.
+                    // The problematic case is 2 walls side by side with open space beyond both:
+                    // [open] [wall] [wall] [open] — this is double-thick
+                    if (wallEast && !wallWest)
+                    {
+                        var beyond = pos + IntVec3.East + IntVec3.East;
+                        if (beyond.InBounds(map) && !HasWallAt(map, beyond))
+                            doubleThickWalls++;
+                    }
+                    if (wallNorth && !wallSouth)
+                    {
+                        var beyond = pos + IntVec3.North + IntVec3.North;
+                        if (beyond.InBounds(map) && !HasWallAt(map, beyond))
+                            doubleThickWalls++;
+                    }
+                }
+            }
+            // Divide by 2 because each pair gets counted from both walls
+            doubleThickWalls /= 2;
+            if (doubleThickWalls > 0)
+                warnings.Add(doubleThickWalls + " double-thick wall pair(s) detected (wastes resources)");
+
             if (exposedBeds > 0)
                 warnings.Add(exposedBeds + " bed(s)/bed blueprint(s) not in enclosed rooms");
             if (outdoorBlueprints > 0)
@@ -128,6 +219,19 @@ namespace RimBot
             {
                 Log.Message("[RimBot] [SPATIAL] Day " + string.Format("{0:F1}", day) + " — no issues detected");
             }
+        }
+
+        private static bool HasWallAt(Map map, IntVec3 cell)
+        {
+            if (!cell.InBounds(map)) return false;
+            foreach (var thing in cell.GetThingList(map))
+            {
+                if (thing.Faction != Faction.OfPlayer) continue;
+                if (thing.def.defName == "Wall") return true;
+                if (thing is Blueprint bp && bp.def.entityDefToBuild?.defName == "Wall") return true;
+                if (thing is Frame fr && fr.def.entityDefToBuild?.defName == "Wall") return true;
+            }
+            return false;
         }
 
         private static bool IsCellBlocked(Map map, IntVec3 cell, Thing ignore)
@@ -320,6 +424,76 @@ namespace RimBot
                 int penalty = outdoorProdBlueprints * 5;
                 score -= penalty;
                 details.Add("outdoor_workbench_bp=" + outdoorProdBlueprints + " (-" + penalty + ")");
+            }
+
+            // Blocked doors (heavy penalty — makes rooms unusable)
+            int blockedDoorCount = 0;
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing.Faction != Faction.OfPlayer) continue;
+                bool isDoor = thing.def.IsDoor;
+                if (!isDoor && thing is Blueprint dbp2 && dbp2.def.entityDefToBuild is ThingDef dd && dd.IsDoor) isDoor = true;
+                if (!isDoor && thing is Frame dfr2 && dfr2.def.entityDefToBuild is ThingDef dd2 && dd2.IsDoor) isDoor = true;
+                if (!isDoor) continue;
+                foreach (var adj in GenAdj.CardinalDirections)
+                {
+                    var adjCell = thing.Position + adj;
+                    if (!adjCell.InBounds(map)) continue;
+                    foreach (var adjThing in adjCell.GetThingList(map))
+                    {
+                        if (adjThing == thing) continue;
+                        if (adjThing.def.passability == Traversability.Impassable) { blockedDoorCount++; break; }
+                        if (adjThing is Blueprint abp2)
+                        {
+                            var adef2 = abp2.def.entityDefToBuild as ThingDef;
+                            if (adef2 != null && (adef2.passability == Traversability.Impassable || adef2.fillPercent > 0.3f))
+                            { blockedDoorCount++; break; }
+                        }
+                    }
+                    if (blockedDoorCount > 0) break;
+                }
+            }
+            if (blockedDoorCount > 0)
+            {
+                int penalty = blockedDoorCount * 10;
+                score -= penalty;
+                details.Add("blocked_doors=" + blockedDoorCount + " (-" + penalty + ")");
+            }
+
+            // Double-thick walls
+            int doubleWalls = 0;
+            var wallDefScore = DefDatabase<ThingDef>.GetNamed("Wall", false);
+            if (wallDefScore != null)
+            {
+                var countedPairs = new HashSet<long>();
+                foreach (var building in map.listerBuildings.allBuildingsColonist)
+                {
+                    if (building == null || !building.Spawned || building.def != wallDefScore) continue;
+                    var pos = building.Position;
+                    // Check east and north only to avoid double-counting
+                    foreach (var dir in new[] { IntVec3.East, IntVec3.North })
+                    {
+                        var neighbor = pos + dir;
+                        if (!HasWallAt(map, neighbor)) continue;
+                        var beyond = neighbor + dir;
+                        var before = pos - dir;
+                        // Double-thick if open on both outside faces
+                        if ((!before.InBounds(map) || !HasWallAt(map, before)) &&
+                            (!beyond.InBounds(map) || !HasWallAt(map, beyond)))
+                        {
+                            long key = Math.Min(pos.x + pos.z * 10000, neighbor.x + neighbor.z * 10000) * 100000L +
+                                       Math.Max(pos.x + pos.z * 10000, neighbor.x + neighbor.z * 10000);
+                            if (countedPairs.Add(key))
+                                doubleWalls++;
+                        }
+                    }
+                }
+            }
+            if (doubleWalls > 0)
+            {
+                int penalty = doubleWalls * 3;
+                score -= penalty;
+                details.Add("double_walls=" + doubleWalls + " (-" + penalty + ")");
             }
 
             // Track total unbuilt blueprints for context (not a penalty, just info)
