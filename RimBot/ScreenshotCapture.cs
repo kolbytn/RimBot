@@ -85,6 +85,7 @@ namespace RimBot
 
                     RenderTexture.active = rt;
                     DrawOwnershipOverlay(req, map);
+                    DrawGrid(req);
                     if (req.Labels != null && req.Labels.Count > 0)
                         DrawLabels(req);
 
@@ -171,6 +172,185 @@ namespace RimBot
 
             GL.End();
             GL.PopMatrix();
+        }
+
+        private static void DrawGrid(CaptureRequest req)
+        {
+            float viewSize = req.CameraSize * 2f;
+            float size = req.PixelSize;
+            float tilePixels = size / viewSize;
+            int halfTiles = (int)req.CameraSize;
+            int gridStep = 5;
+
+            if (bgMaterial == null)
+            {
+                bgMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+                bgMaterial.hideFlags = HideFlags.HideAndDontSave;
+                bgMaterial.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+                bgMaterial.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                bgMaterial.SetInt("_Cull", 0);
+                bgMaterial.SetInt("_ZWrite", 0);
+                bgMaterial.SetInt("_ZTest", (int)CompareFunction.Always);
+            }
+
+            GL.PushMatrix();
+            GL.LoadPixelMatrix(0, size, size, 0);
+            bgMaterial.SetPass(0);
+            GL.Begin(GL.QUADS);
+
+            float lineThickness = 1f;
+
+            // Grid lines every gridStep tiles
+            for (int t = -halfTiles; t <= halfTiles; t += gridStep)
+            {
+                if (t == 0) continue; // draw axes separately
+                float px = (t / viewSize) * size + size / 2f;
+                float py = (-t / viewSize) * size + size / 2f;
+
+                // Vertical line at x=t
+                GL.Color(new Color(1f, 1f, 1f, 0.15f));
+                GL.Vertex3(px - lineThickness / 2f, 0, 0);
+                GL.Vertex3(px + lineThickness / 2f, 0, 0);
+                GL.Vertex3(px + lineThickness / 2f, size, 0);
+                GL.Vertex3(px - lineThickness / 2f, size, 0);
+
+                // Horizontal line at z=t (z is inverted in screen space)
+                GL.Vertex3(0, py - lineThickness / 2f, 0);
+                GL.Vertex3(size, py - lineThickness / 2f, 0);
+                GL.Vertex3(size, py + lineThickness / 2f, 0);
+                GL.Vertex3(0, py + lineThickness / 2f, 0);
+            }
+
+            // Crosshair at (0,0) — pawn's position — brighter and thicker
+            float axisThickness = 2f;
+            GL.Color(new Color(1f, 1f, 0f, 0.4f));
+
+            // Vertical axis (x=0)
+            GL.Vertex3(size / 2f - axisThickness / 2f, 0, 0);
+            GL.Vertex3(size / 2f + axisThickness / 2f, 0, 0);
+            GL.Vertex3(size / 2f + axisThickness / 2f, size, 0);
+            GL.Vertex3(size / 2f - axisThickness / 2f, size, 0);
+
+            // Horizontal axis (z=0)
+            GL.Vertex3(0, size / 2f - axisThickness / 2f, 0);
+            GL.Vertex3(size, size / 2f - axisThickness / 2f, 0);
+            GL.Vertex3(size, size / 2f + axisThickness / 2f, 0);
+            GL.Vertex3(0, size / 2f + axisThickness / 2f, 0);
+
+            GL.End();
+            GL.PopMatrix();
+
+            // Draw coordinate labels at grid intersections
+            if (labelFont == null)
+                labelFont = Font.CreateDynamicFontFromOSFont("Arial", 16);
+
+            // Collect characters for rasterization
+            var charBuf = new System.Text.StringBuilder();
+            for (int t = -halfTiles; t <= halfTiles; t += gridStep)
+            {
+                if (t == 0) continue;
+                charBuf.Append(t.ToString());
+            }
+            charBuf.Append("+X +Z");
+            labelFont.RequestCharactersInTexture(charBuf.ToString(), 10, FontStyle.Normal);
+
+            if (textMaterial == null)
+            {
+                textMaterial = new Material(labelFont.material);
+                textMaterial.hideFlags = HideFlags.HideAndDontSave;
+                textMaterial.SetInt("_ZTest", (int)CompareFunction.Always);
+                textMaterial.SetInt("_ZWrite", 0);
+            }
+            textMaterial.mainTexture = labelFont.material.mainTexture;
+
+            GL.PushMatrix();
+            GL.LoadPixelMatrix(0, size, size, 0);
+
+            // Background pass for coordinate labels
+            bgMaterial.SetPass(0);
+            GL.Begin(GL.QUADS);
+            for (int t = -halfTiles; t <= halfTiles; t += gridStep)
+            {
+                if (t == 0) continue;
+                string label = t.ToString();
+                int textW = MeasureText(label, 10, FontStyle.Normal);
+
+                // X-axis label (along bottom of center horizontal line)
+                float px = (t / viewSize) * size + size / 2f;
+                GL.Color(new Color(0f, 0f, 0f, 0.6f));
+                GL.Vertex3(px - textW / 2f - 1, size / 2f + 2, 0);
+                GL.Vertex3(px + textW / 2f + 1, size / 2f + 2, 0);
+                GL.Vertex3(px + textW / 2f + 1, size / 2f + 14, 0);
+                GL.Vertex3(px - textW / 2f - 1, size / 2f + 14, 0);
+
+                // Z-axis label (along right of center vertical line)
+                float py = (-t / viewSize) * size + size / 2f;
+                GL.Vertex3(size / 2f + 3, py - 6, 0);
+                GL.Vertex3(size / 2f + 3 + textW + 2, py - 6, 0);
+                GL.Vertex3(size / 2f + 3 + textW + 2, py + 6, 0);
+                GL.Vertex3(size / 2f + 3, py + 6, 0);
+            }
+            GL.End();
+
+            // Text pass
+            textMaterial.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(new Color(1f, 1f, 1f, 0.8f));
+            for (int t = -halfTiles; t <= halfTiles; t += gridStep)
+            {
+                if (t == 0) continue;
+                string label = t.ToString();
+                int textW = MeasureText(label, 10, FontStyle.Normal);
+
+                // X-axis label
+                float px = (t / viewSize) * size + size / 2f;
+                DrawTextAt(label, px - textW / 2f, size / 2f + 12, 10, FontStyle.Normal);
+
+                // Z-axis label
+                float py = (-t / viewSize) * size + size / 2f;
+                DrawTextAt(label, size / 2f + 4, py + 4, 10, FontStyle.Normal);
+            }
+            GL.End();
+
+            GL.PopMatrix();
+        }
+
+        private static int MeasureText(string text, int fontSize, FontStyle style)
+        {
+            int width = 0;
+            foreach (char c in text)
+            {
+                CharacterInfo ci;
+                if (labelFont.GetCharacterInfo(c, out ci, fontSize, style))
+                    width += ci.advance;
+            }
+            return width;
+        }
+
+        private static void DrawTextAt(string text, float x, float baselineY, int fontSize, FontStyle style)
+        {
+            float penX = x;
+            foreach (char c in text)
+            {
+                CharacterInfo ci;
+                if (!labelFont.GetCharacterInfo(c, out ci, fontSize, style))
+                    continue;
+                float x0 = penX + ci.minX;
+                float x1 = penX + ci.maxX;
+                float y0 = baselineY - ci.maxY;
+                float y1 = baselineY - ci.minY;
+
+                GL.TexCoord2(ci.uvTopLeft.x, ci.uvTopLeft.y);
+                GL.Vertex3(x0, y0, 0);
+                GL.TexCoord2(ci.uvTopRight.x, ci.uvTopRight.y);
+                GL.Vertex3(x1, y0, 0);
+                GL.TexCoord2(ci.uvBottomRight.x, ci.uvBottomRight.y);
+                GL.Vertex3(x1, y1, 0);
+                GL.TexCoord2(ci.uvBottomLeft.x, ci.uvBottomLeft.y);
+                GL.Vertex3(x0, y1, 0);
+
+                penX += ci.advance;
+            }
         }
 
         private static void DrawLabels(CaptureRequest req)
