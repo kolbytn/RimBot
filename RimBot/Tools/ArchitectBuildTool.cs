@@ -46,7 +46,8 @@ namespace RimBot.Tools
             {
                 Name = Name,
                 Description = "Place " + categoryLabel + " blueprints. Use list_buildables to see available items. " +
-                    "Coordinates are relative to you at (0,0). +X=east, +Z=north. Wood is used as material where applicable.",
+                    "Coordinates are relative to you at (0,0). +X=east, +Z=north. Wood is used as material where applicable." +
+                    (categoryLabel == "production" ? " IMPORTANT: Workbenches need an open tile on their interaction side (front). Do not place them directly against walls — leave at least 1 tile of clearance in front." : ""),
                 ParametersJson = "{\"type\":\"object\",\"properties\":{" +
                     "\"item\":{\"type\":\"string\"," +
                     "\"description\":\"defName of the thing to build (e.g. Wall, Door, Bed). Use list_buildables to find valid names.\"}," +
@@ -249,7 +250,12 @@ namespace RimBot.Tools
             }
 
             Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] " + toolName + "(" +
-                item + ", rot=" + rotInt + "): placed=" + placed + " skipped=" + skipped);
+                item + ", rot=" + rotInt + "): placed=" + placed + " skipped=" + skipped + skipInfo);
+
+            // When everything was skipped, give brief actionable advice
+            string advice = "";
+            if (placed == 0 && skipped > 0)
+                advice = " Try different coordinates further from existing buildings.";
 
             onComplete(new ToolResult
             {
@@ -257,7 +263,7 @@ namespace RimBot.Tools
                 ToolName = Name,
                 Success = true,
                 Content = "Placed " + placed + " " + item + " blueprints. " +
-                    skipped + " skipped" + skipInfo + "."
+                    skipped + " skipped" + skipInfo + "." + advice
             });
         }
 
