@@ -102,6 +102,21 @@ namespace RimBot.Tools
                             pawns.Add(p.LabelShort + " [" + role + "] at " + coords);
                             totalEntries++;
                         }
+                        else if (thing is Blueprint bp)
+                        {
+                            string targetName = bp.def.entityDefToBuild?.label ?? bp.def.label;
+                            buildings.Add(targetName + " (blueprint) at " + coords);
+                            totalEntries++;
+                        }
+                        else if (thing is Frame fr)
+                        {
+                            string targetName = fr.def.entityDefToBuild?.label ?? fr.def.label;
+                            int pct = fr.WorkLeft > 0 && fr.def.entityDefToBuild is ThingDef td
+                                ? (int)((1f - fr.WorkLeft / td.GetStatValueAbstract(StatDefOf.WorkToBuild)) * 100)
+                                : 0;
+                            buildings.Add(targetName + " (frame, " + pct + "% built) at " + coords);
+                            totalEntries++;
+                        }
                         else if (thing.def.building != null)
                         {
                             string hp = thing.HitPoints + "/" + thing.MaxHitPoints;

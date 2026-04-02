@@ -83,6 +83,16 @@ namespace RimBot.Tools
                         role = "visitor";
                     pawns.Add(p.LabelShort + " [" + role + "]");
                 }
+                else if (thing is Blueprint bp)
+                {
+                    string targetName = bp.def.entityDefToBuild?.label ?? bp.def.label;
+                    buildings.Add(targetName + " (blueprint)");
+                }
+                else if (thing is Frame fr)
+                {
+                    string targetName = fr.def.entityDefToBuild?.label ?? fr.def.label;
+                    buildings.Add(targetName + " (frame)");
+                }
                 else if (thing.def.building != null)
                 {
                     string hp = thing.HitPoints + "/" + thing.MaxHitPoints;

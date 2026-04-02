@@ -129,6 +129,8 @@ namespace RimBot
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
                     "Areas highlighted in red in screenshots belong to other colonists — do not build, zone, or place orders in red areas. " +
                     "You can only interact with your own colonists — visitors, traders, and NPCs on the map cannot be controlled. " +
+                    "Before placing buildings, use scan_area to check for existing walls, blueprints, and open space. " +
+                    "Scan results show blueprints and frames so you can see what's already been placed. " +
                     "Focus on building, farming, crafting, and researching to grow the colony.";
 
                 agentConversation = new List<ChatMessage>
@@ -434,6 +436,9 @@ namespace RimBot
             if (infra.Count > 0)
                 sb.AppendLine("You already have: " + string.Join(", ", infra) + ". Do not rebuild these.");
 
+            // --- Nearby structures (helps bot complete rooms across cycles) ---
+            AppendNearbyStructures(sb, pawn, map);
+
             // --- Day ---
             float daysPassed = Find.TickManager.TicksGame / 60000f;
             sb.AppendLine("Colony day: " + daysPassed.ToString("F1") + ".");
@@ -454,6 +459,117 @@ namespace RimBot
             var def = DefDatabase<ThingDef>.GetNamed(defName, false);
             if (def == null) return false;
             return map.listerBuildings.ColonistsHaveBuilding(def);
+        }
+
+        /// <summary>
+        /// Scans nearby walls, doors, and blueprints to help the bot understand where its
+        /// existing structures are relative to its current position. Reports bounding box
+        /// and gap information so the bot can complete rooms across cycles.
+        /// </summary>
+        private static void AppendNearbyStructures(StringBuilder sb, Pawn pawn, Map map)
+        {
+            var pawnPos = pawn.Position;
+            int scanRadius = 20;
+
+            // Collect wall/door positions (completed + blueprints + frames)
+            var wallPositions = new List<IntVec3>();
+            var doorPositions = new List<IntVec3>();
+
+            for (int dx = -scanRadius; dx <= scanRadius; dx++)
+            {
+                for (int dz = -scanRadius; dz <= scanRadius; dz++)
+                {
+                    var cell = new IntVec3(pawnPos.x + dx, 0, pawnPos.z + dz);
+                    if (!cell.InBounds(map)) continue;
+
+                    foreach (var thing in cell.GetThingList(map))
+                    {
+                        if (thing.Faction != Faction.OfPlayer) continue;
+
+                        string defName = null;
+                        if (thing is Blueprint bp)
+                            defName = bp.def.entityDefToBuild?.defName;
+                        else if (thing is Frame fr)
+                            defName = fr.def.entityDefToBuild?.defName;
+                        else if (thing.def.building != null)
+                            defName = thing.def.defName;
+
+                        if (defName == null) continue;
+
+                        if (defName == "Wall")
+                            wallPositions.Add(thing.Position);
+                        else if (defName == "Door")
+                            doorPositions.Add(thing.Position);
+                    }
+                }
+            }
+
+            if (wallPositions.Count == 0) return;
+
+            // Compute bounding box in relative coordinates
+            int minX = int.MaxValue, maxX = int.MinValue;
+            int minZ = int.MaxValue, maxZ = int.MinValue;
+            foreach (var pos in wallPositions)
+            {
+                int rx = pos.x - pawnPos.x;
+                int rz = pos.z - pawnPos.z;
+                if (rx < minX) minX = rx;
+                if (rx > maxX) maxX = rx;
+                if (rz < minZ) minZ = rz;
+                if (rz > maxZ) maxZ = rz;
+            }
+            foreach (var pos in doorPositions)
+            {
+                int rx = pos.x - pawnPos.x;
+                int rz = pos.z - pawnPos.z;
+                if (rx < minX) minX = rx;
+                if (rx > maxX) maxX = rx;
+                if (rz < minZ) minZ = rz;
+                if (rz > maxZ) maxZ = rz;
+            }
+
+            sb.AppendLine("Nearby structures: " + wallPositions.Count + " walls, " +
+                doorPositions.Count + " doors in range. Bounding box: (" +
+                minX + "," + minZ + ") to (" + maxX + "," + maxZ + ") relative to you.");
+
+            // Check for gaps in the bounding box perimeter — these are where the room is incomplete
+            var wallSet = new HashSet<long>();
+            foreach (var pos in wallPositions)
+                wallSet.Add((long)pos.x << 32 | (long)(uint)pos.z);
+            foreach (var pos in doorPositions)
+                wallSet.Add((long)pos.x << 32 | (long)(uint)pos.z);
+
+            // Check all 4 edges of the bounding box for gaps
+            int absMinX = pawnPos.x + minX, absMaxX = pawnPos.x + maxX;
+            int absMinZ = pawnPos.z + minZ, absMaxZ = pawnPos.z + maxZ;
+            var gapPositions = new List<string>();
+
+            for (int x = absMinX; x <= absMaxX; x++)
+            {
+                if (!wallSet.Contains((long)x << 32 | (long)(uint)absMinZ))
+                    gapPositions.Add("(" + (x - pawnPos.x) + "," + (absMinZ - pawnPos.z) + ")");
+                if (!wallSet.Contains((long)x << 32 | (long)(uint)absMaxZ))
+                    gapPositions.Add("(" + (x - pawnPos.x) + "," + (absMaxZ - pawnPos.z) + ")");
+            }
+            for (int z = absMinZ + 1; z < absMaxZ; z++)
+            {
+                if (!wallSet.Contains((long)absMinX << 32 | (long)(uint)z))
+                    gapPositions.Add("(" + (absMinX - pawnPos.x) + "," + (z - pawnPos.z) + ")");
+                if (!wallSet.Contains((long)absMaxX << 32 | (long)(uint)z))
+                    gapPositions.Add("(" + (absMaxX - pawnPos.x) + "," + (z - pawnPos.z) + ")");
+            }
+
+            if (gapPositions.Count > 0 && gapPositions.Count <= 15)
+            {
+                sb.AppendLine("Room is INCOMPLETE: " + gapPositions.Count +
+                    " gaps in perimeter. Place walls at: " + string.Join(", ", gapPositions));
+            }
+            else if (gapPositions.Count > 15)
+            {
+                sb.AppendLine("Room is INCOMPLETE: " + gapPositions.Count + " gaps — too many walls missing. Consider starting a smaller room.");
+            }
+            else if (gapPositions.Count == 0 && wallPositions.Count >= 8)
+                sb.AppendLine("Room perimeter is complete.");
         }
 
         private void RecordSingleTurn(AgentTurn turn, int iterIndex, string systemPrompt)
