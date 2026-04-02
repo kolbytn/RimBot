@@ -9,6 +9,7 @@ namespace RimBot
     /// <summary>
     /// Evaluates colony spatial layout quality. Runs periodically to detect
     /// placement problems and score overall colony organization.
+    /// Checks both completed buildings AND blueprints/frames.
     /// </summary>
     public static class SpatialEvaluator
     {
@@ -43,7 +44,7 @@ namespace RimBot
             }
         }
 
-        // --- #2: Spatial heuristics — flag bad placement patterns ---
+        // --- Spatial heuristics — flag bad placement patterns ---
 
         private static void LogSpatialWarnings(Map map, int tick)
         {
@@ -52,12 +53,13 @@ namespace RimBot
 
             int exposedBeds = 0;
             int blockedWorkbenches = 0;
+            int outdoorBlueprints = 0;
 
+            // Check completed buildings
             foreach (var building in map.listerBuildings.allBuildingsColonist)
             {
                 if (building == null || !building.Spawned) continue;
 
-                // Beds outside enclosed rooms
                 if (building.def.IsBed)
                 {
                     var room = building.GetRoom();
@@ -65,28 +67,54 @@ namespace RimBot
                         exposedBeds++;
                 }
 
-                // Workbenches with blocked interaction spots
                 if (building.def.hasInteractionCell)
                 {
-                    var cell = building.InteractionCell;
-                    if (cell.InBounds(map))
+                    if (IsCellBlocked(map, building.InteractionCell, building))
                     {
-                        foreach (var thing in cell.GetThingList(map))
-                        {
-                            if (thing.def.passability == Traversability.Impassable && thing != building)
-                            {
-                                blockedWorkbenches++;
-                                warnings.Add(building.def.label + " at (" + building.Position.x + "," +
-                                    building.Position.z + ") has blocked interaction spot");
-                                break;
-                            }
-                        }
+                        blockedWorkbenches++;
+                        warnings.Add(building.def.label + " at (" + building.Position.x + "," +
+                            building.Position.z + ") has blocked interaction spot");
                     }
                 }
             }
 
+            // Check blueprints and frames for the same issues
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                BuildableDef targetDef = null;
+                if (thing is Blueprint bp)
+                    targetDef = bp.def.entityDefToBuild;
+                else if (thing is Frame fr)
+                    targetDef = fr.def.entityDefToBuild;
+                else
+                    continue;
+
+                if (thing.Faction != Faction.OfPlayer) continue;
+
+                var thingDef = targetDef as ThingDef;
+                if (thingDef == null) continue;
+
+                // Production building blueprints placed outdoors
+                if (thingDef.building != null && thingDef.hasInteractionCell)
+                {
+                    var room = thing.GetRoom();
+                    if (room == null || room.TouchesMapEdge)
+                        outdoorBlueprints++;
+                }
+
+                // Bed blueprints outside rooms
+                if (thingDef.IsBed)
+                {
+                    var room = thing.GetRoom();
+                    if (room == null || room.TouchesMapEdge)
+                        exposedBeds++;
+                }
+            }
+
             if (exposedBeds > 0)
-                warnings.Add(exposedBeds + " bed(s) not in enclosed rooms");
+                warnings.Add(exposedBeds + " bed(s)/bed blueprint(s) not in enclosed rooms");
+            if (outdoorBlueprints > 0)
+                warnings.Add(outdoorBlueprints + " workbench blueprint(s) placed outdoors");
 
             if (warnings.Count > 0)
             {
@@ -102,7 +130,19 @@ namespace RimBot
             }
         }
 
-        // --- #3: Colony quality score ---
+        private static bool IsCellBlocked(Map map, IntVec3 cell, Thing ignore)
+        {
+            if (!cell.InBounds(map)) return true;
+            foreach (var thing in cell.GetThingList(map))
+            {
+                if (thing == ignore) continue;
+                if (thing.def.passability == Traversability.Impassable)
+                    return true;
+            }
+            return false;
+        }
+
+        // --- Colony quality score ---
 
         private static void LogColonyScore(Map map, int tick)
         {
@@ -110,7 +150,7 @@ namespace RimBot
             int score = 0;
             var details = new List<string>();
 
-            // Discover enclosed rooms via player buildings
+            // --- Positive: enclosed rooms discovered via player buildings ---
             var seenRooms = new HashSet<int>();
             int enclosedRooms = 0;
             int roomsWithBeds = 0;
@@ -148,7 +188,7 @@ namespace RimBot
             if (roomsWithLight > 0)
                 details.Add("lit_rooms=" + roomsWithLight + " (+" + (roomsWithLight * 2) + ")");
 
-            // Key production buildings (completed only)
+            // --- Positive: completed production buildings ---
             var prodDefs = new string[]
             {
                 "FueledStove", "ElectricStove", "TableButcher",
@@ -167,7 +207,7 @@ namespace RimBot
                 }
             }
 
-            // Zones
+            // --- Positive: zones ---
             int stockpiles = 0;
             int growingZones = 0;
             int totalGrowCells = 0;
@@ -192,7 +232,7 @@ namespace RimBot
             score += growBonus;
             if (growBonus > 0) details.Add("farm_cells=" + totalGrowCells + " (+" + growBonus + ")");
 
-            // Furniture: table
+            // --- Positive: furniture ---
             var table1 = DefDatabase<ThingDef>.GetNamed("Table1x2c", false);
             var table2 = DefDatabase<ThingDef>.GetNamed("Table2x2c", false);
             if ((table1 != null && map.listerBuildings.ColonistsHaveBuilding(table1)) ||
@@ -202,7 +242,7 @@ namespace RimBot
                 details.Add("table (+5)");
             }
 
-            // Research progress beyond scenario defaults
+            // --- Positive: research ---
             int finishedResearch = 0;
             foreach (var proj in DefDatabase<ResearchProjectDef>.AllDefs)
             {
@@ -212,7 +252,9 @@ namespace RimBot
             score += botResearch * 5;
             if (botResearch > 0) details.Add("researched=" + botResearch + " (+" + (botResearch * 5) + ")");
 
-            // Penalties: exposed beds
+            // --- Penalties ---
+
+            // Exposed beds (completed)
             int exposedBeds = 0;
             foreach (var building in map.listerBuildings.allBuildingsColonist)
             {
@@ -227,6 +269,62 @@ namespace RimBot
                 score -= penalty;
                 details.Add("exposed_beds=" + exposedBeds + " (-" + penalty + ")");
             }
+
+            // Blocked workbenches (completed)
+            int blockedBenches = 0;
+            foreach (var building in map.listerBuildings.allBuildingsColonist)
+            {
+                if (building == null || !building.Spawned || !building.def.hasInteractionCell) continue;
+                if (IsCellBlocked(map, building.InteractionCell, building))
+                    blockedBenches++;
+            }
+            if (blockedBenches > 0)
+            {
+                int penalty = blockedBenches * 8;
+                score -= penalty;
+                details.Add("blocked_benches=" + blockedBenches + " (-" + penalty + ")");
+            }
+
+            // Outdoor workbench blueprints/frames — indicates confused placement
+            int outdoorProdBlueprints = 0;
+            int stalledBlueprints = 0;
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                BuildableDef targetDef = null;
+                if (thing is Blueprint bp)
+                    targetDef = bp.def.entityDefToBuild;
+                else if (thing is Frame fr)
+                    targetDef = fr.def.entityDefToBuild;
+                else
+                    continue;
+
+                if (thing.Faction != Faction.OfPlayer) continue;
+
+                var thingDef = targetDef as ThingDef;
+                if (thingDef == null) continue;
+
+                // Count all outstanding blueprints/frames
+                stalledBlueprints++;
+
+                // Outdoor production blueprints
+                if (thingDef.hasInteractionCell)
+                {
+                    var room = thing.GetRoom();
+                    if (room == null || room.TouchesMapEdge)
+                        outdoorProdBlueprints++;
+                }
+            }
+
+            if (outdoorProdBlueprints > 0)
+            {
+                int penalty = outdoorProdBlueprints * 5;
+                score -= penalty;
+                details.Add("outdoor_workbench_bp=" + outdoorProdBlueprints + " (-" + penalty + ")");
+            }
+
+            // Track total unbuilt blueprints for context (not a penalty, just info)
+            if (stalledBlueprints > 0)
+                details.Add("pending_blueprints=" + stalledBlueprints);
 
             Log.Message("[RimBot] [COLONY_SCORE] Day " + string.Format("{0:F1}", day) +
                 " | Score: " + score + " | " + string.Join(", ", details));

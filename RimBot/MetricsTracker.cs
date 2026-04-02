@@ -27,6 +27,7 @@ namespace RimBot
         private static readonly Dictionary<string, int> toolErrorCounts = new Dictionary<string, int>();
         private static readonly List<string> completedResearch = new List<string>();
         private static readonly Dictionary<string, int> buildingsCompleted = new Dictionary<string, int>();
+        private static readonly Dictionary<string, int> blueprintsPlaced = new Dictionary<string, int>();
         private static readonly Dictionary<string, int> itemsCrafted = new Dictionary<string, int>();
         private static int colonistDeaths;
 
@@ -52,6 +53,7 @@ namespace RimBot
             toolErrorCounts.Clear();
             completedResearch.Clear();
             buildingsCompleted.Clear();
+            blueprintsPlaced.Clear();
             itemsCrafted.Clear();
             colonistDeaths = 0;
             lastSnapshotTick = -1;
@@ -110,6 +112,14 @@ namespace RimBot
                 Log.Message("[RimBot] [METRICS] [ACHIEVEMENT] Research completed: " + projectLabel +
                     " (total: " + completedResearch.Count + ")");
             }
+        }
+
+        public static void RecordBlueprintPlaced(string defName, string pawnLabel, int count)
+        {
+            if (blueprintsPlaced.ContainsKey(defName))
+                blueprintsPlaced[defName] += count;
+            else
+                blueprintsPlaced[defName] = count;
         }
 
         public static void RecordBuildingComplete(string defName, string builderLabel)
@@ -359,6 +369,17 @@ namespace RimBot
             // Achievements
             if (completedResearch.Count > 0)
                 sb.AppendLine("  Research completed (" + completedResearch.Count + "): " + string.Join(", ", completedResearch));
+
+            if (blueprintsPlaced.Count > 0)
+            {
+                int totalBP = 0;
+                foreach (var v in blueprintsPlaced.Values) totalBP += v;
+                var top5bp = blueprintsPlaced.OrderByDescending(kvp => kvp.Value).Take(5);
+                var bpParts = new List<string>();
+                foreach (var kvp in top5bp)
+                    bpParts.Add(kvp.Key + "=" + kvp.Value);
+                sb.AppendLine("  Blueprints placed (" + totalBP + "): " + string.Join(", ", bpParts));
+            }
 
             if (buildingsCompleted.Count > 0)
             {

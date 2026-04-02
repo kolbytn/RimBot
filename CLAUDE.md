@@ -27,7 +27,9 @@ Store all temporary files (saved logs, test artifacts, etc.) in the `tmp/` direc
 
 ## TODO List
 
-After every test run where you read and analyze logs, update the **Known Issues & TODO** section in `README.md`. Add new issues you discover, update existing items with verification status, and note metric changes. Leave fixed/checked items in the list for historical reference — do not remove them.
+After every test run where you read and analyze logs AND screenshots, update `TODO.md`. Add new issues you discover, update existing items with verification status, and note metric changes. Leave fixed/checked items in the list for historical reference — do not remove them.
+
+Screenshots are saved to `<RimWorld persistent data>/RimBot_Screenshots/<PawnName>/`. Always review them after test runs — logs alone miss spatial problems like blocked doorways, outdoor duplicate blueprints, and poor building placement.
 
 ## In-Game Log Testing
 

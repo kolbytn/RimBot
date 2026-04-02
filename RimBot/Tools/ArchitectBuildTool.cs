@@ -252,6 +252,9 @@ namespace RimBot.Tools
             Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] " + toolName + "(" +
                 item + ", rot=" + rotInt + "): placed=" + placed + " skipped=" + skipped + skipInfo);
 
+            if (placed > 0)
+                MetricsTracker.RecordBlueprintPlaced(item, context.PawnLabel, placed);
+
             // When everything was skipped, give brief actionable advice
             string advice = "";
             if (placed == 0 && skipped > 0)
