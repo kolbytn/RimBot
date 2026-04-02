@@ -72,8 +72,25 @@ namespace RimBot
                     continue;
                 }
 
-                // 3. Append assistant message to conversation
+                // 3. Log turn details and append assistant message to conversation
                 var assistantParts = response.AssistantParts ?? new List<ContentPart>();
+
+                // Log response text and token usage for this turn
+                string turnText = "";
+                foreach (var part in assistantParts)
+                {
+                    if (part.Type == "text" && !string.IsNullOrEmpty(part.Text))
+                        turnText += part.Text;
+                }
+                if (!string.IsNullOrEmpty(turnText))
+                {
+                    string truncated = turnText.Length > 300 ? turnText.Substring(0, 300) + "..." : turnText;
+                    Log.Message("[RimBot] [AGENT] [" + toolContext.PawnLabel + "] LLM response (iter " + i + "): " + truncated);
+                }
+                Log.Message("[RimBot] [AGENT] [" + toolContext.PawnLabel + "] Tokens (iter " + i + "): " +
+                    response.InputTokens + " in, " + response.OutputTokens + " out, " +
+                    response.CacheReadTokens + " cache, " + response.ReasoningTokens + " reasoning");
+
                 conversation.Add(new ChatMessage("assistant", assistantParts));
 
                 var turn = new AgentTurn
@@ -168,8 +185,11 @@ namespace RimBot
 
                     try
                     {
+                        var callForClosure = call;
                         tool.Execute(call, context, toolResult =>
                         {
+                            MetricsTracker.RecordToolCall(context.PawnLabel, callForClosure.Name,
+                                toolResult.Success, toolResult.Content);
                             lock (lockObj)
                             {
                                 results.Add(toolResult);

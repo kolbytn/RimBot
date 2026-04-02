@@ -69,6 +69,7 @@ namespace RimBot
                 {
                     lastInitMapId = mapId;
                     speedForceTicksLeft = 120; // keep forcing for ~2 seconds
+                    MetricsTracker.Reset();
                     UnforbidAll(Find.CurrentMap);
                     EnableAllWork(Find.CurrentMap);
                 }
@@ -167,6 +168,81 @@ namespace RimBot
                 return false;
             }
             return true;
+        }
+    }
+
+    /// <summary>Track research project completion.</summary>
+    [HarmonyPatch(typeof(ResearchManager), nameof(ResearchManager.FinishProject))]
+    public static class ResearchFinishPatch
+    {
+        public static void Postfix(ResearchProjectDef proj)
+        {
+            if (proj != null)
+                MetricsTracker.RecordResearchComplete(proj.label);
+        }
+    }
+
+    /// <summary>Track when blueprints are replaced by completed buildings.</summary>
+    [HarmonyPatch(typeof(Frame), nameof(Frame.CompleteConstruction))]
+    public static class BuildingCompletePatch
+    {
+        public static void Prefix(Frame __instance, Pawn worker)
+        {
+            if (__instance?.def?.entityDefToBuild == null) return;
+            if (worker?.Faction == null || !worker.Faction.IsPlayer) return;
+
+            string defName = __instance.def.entityDefToBuild.defName;
+            MetricsTracker.RecordBuildingComplete(defName, worker.LabelShort);
+        }
+    }
+
+    /// <summary>Track when items are crafted at workbenches.</summary>
+    [HarmonyPatch(typeof(GenRecipe), nameof(GenRecipe.MakeRecipeProducts))]
+    public static class CraftingCompletePatch
+    {
+        public static void Postfix(RecipeDef recipeDef, Pawn worker, System.Collections.IEnumerable __result)
+        {
+            if (recipeDef == null || worker == null) return;
+            if (worker.Faction == null || !worker.Faction.IsPlayer) return;
+
+            // RecipeDef.products tells us what will be produced
+            if (recipeDef.products != null)
+            {
+                foreach (var product in recipeDef.products)
+                {
+                    if (product.thingDef != null)
+                        MetricsTracker.RecordItemCrafted(product.thingDef.defName, product.count, worker.LabelShort);
+                }
+            }
+        }
+    }
+
+    /// <summary>Track colonist deaths.</summary>
+    [HarmonyPatch(typeof(Pawn), nameof(Pawn.Kill))]
+    public static class ColonistDeathPatch
+    {
+        public static void Prefix(Pawn __instance, DamageInfo? dinfo)
+        {
+            if (__instance?.Faction == null || !__instance.Faction.IsPlayer) return;
+            if (!__instance.RaceProps.Humanlike) return;
+
+            string cause = "unknown";
+            if (dinfo.HasValue && dinfo.Value.Def != null)
+                cause = dinfo.Value.Def.label;
+            else if (__instance.health?.hediffSet?.hediffs != null)
+            {
+                // Check for disease / starvation / hypothermia etc.
+                foreach (var hediff in __instance.health.hediffSet.hediffs)
+                {
+                    if (hediff.CurStage?.lifeThreatening == true)
+                    {
+                        cause = hediff.def.label;
+                        break;
+                    }
+                }
+            }
+
+            MetricsTracker.RecordColonistDeath(__instance.LabelShort, cause);
         }
     }
 }

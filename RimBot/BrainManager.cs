@@ -67,6 +67,7 @@ namespace RimBot
             if (Find.CurrentMap == null)
                 return;
 
+            MetricsTracker.Tick();
             SyncConfigColonists();
             SyncBrains();
 
