@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using HarmonyLib;
 using RimBot.Models;
 using RimBot.Tools;
 using RimWorld;
@@ -40,6 +41,8 @@ namespace RimBot
         private static readonly string ScreenshotSaveDir =
             System.IO.Path.Combine(Application.persistentDataPath, "RimBot_Screenshots");
 
+        private int lastLetterTick; // Track which letters the bot has already seen
+
         public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, string profileId = null)
         {
             PawnId = pawnId;
@@ -72,15 +75,8 @@ namespace RimBot
             float elapsed = lastRunStartedAt > 0 ? Time.realtimeSinceStartup - lastRunStartedAt : 0;
             lastRunStartedAt = Time.realtimeSinceStartup;
 
-            var maxTokens = RimBotMod.Settings.maxTokens;
-            var llmModel = LLMModelFactory.GetModel(Provider);
-            var apiKey = ApiKey;
-            var model = Model;
             var label = PawnLabel;
             var pawnId = PawnId;
-
-            var profile = RimBotMod.Settings.GetProfileById(ProfileId);
-            var thinkingLevel = profile?.ThinkingLevel ?? Models.ThinkingLevel.Medium;
 
             // Get pawn position on main thread
             var pawn = BrainManager.FindPawnById(pawnId);
@@ -114,30 +110,88 @@ namespace RimBot
             bool isFirstCycle = agentConversation == null;
             var context = BuildContext(pawn, map);
 
+            // Capture screenshot before launching agent — bot gets it for free in the first message
+            var screenshotRequests = new List<ScreenshotCapture.CaptureRequest>
+            {
+                new ScreenshotCapture.CaptureRequest
+                {
+                    CenterCell = pawnPos,
+                    CameraSize = 24,
+                    PixelSize = 512,
+                    PawnId = pawnId
+                }
+            };
+
+            ScreenshotCapture.StartBatchCapture(screenshotRequests, screenshotResults =>
+            {
+                string screenshotBase64 = screenshotResults != null && screenshotResults.Length > 0 ? screenshotResults[0] : null;
+
+                BuildConversationAndLaunch(isFirstCycle, label, currentActivity, context,
+                    screenshotBase64, elapsed, pawnId, pawnPos, map);
+            });
+        }
+
+        private void BuildConversationAndLaunch(bool isFirstCycle, string label, string currentActivity,
+            string context, string screenshotBase64, float elapsed, int pawnId, IntVec3 pawnPos, Map map)
+        {
+            var maxTokens = RimBotMod.Settings.maxTokens;
+            var llmModel = LLMModelFactory.GetModel(Provider);
+            var apiKey = ApiKey;
+            var model = Model;
+
+            var profile = RimBotMod.Settings.GetProfileById(ProfileId);
+            var thinkingLevel = profile?.ThinkingLevel ?? Models.ThinkingLevel.Medium;
+
+            // Build user message with screenshot + context as content parts
+            var userParts = new List<ContentPart>();
+            if (screenshotBase64 != null)
+            {
+                userParts.Add(ContentPart.FromImage(screenshotBase64, "image/png"));
+                // Save pre-loaded screenshot to disk for debugging
+                try
+                {
+                    string dir = System.IO.Path.Combine(ScreenshotSaveDir, PawnLabel);
+                    System.IO.Directory.CreateDirectory(dir);
+                    float day = Find.TickManager.TicksGame / 60000f;
+                    string filename = string.Format("day{0:F1}_iter0.png", day);
+                    byte[] pngBytes = Convert.FromBase64String(screenshotBase64);
+                    System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, filename), pngBytes);
+                }
+                catch { }
+            }
+
             if (isFirstCycle)
             {
                 Log.Message("[RimBot] [AGENT] [" + label + "] Starting agent loop...");
 
                 var sysPrompt = "You are the brain of a RimWorld colonist named " + label + ". Play RimWorld. " +
-                    "You have tools to observe and interact with the world. Use get_screenshot to see " +
-                    "your surroundings, inspect_cell and scan_area to examine locations in detail, " +
-                    "find_on_map to locate resources, get_pawn_status to check colonist status. " +
+                    "Each cycle, you receive a screenshot and full status report — no need to request them. " +
+                    "Use tools to ACT, not just observe. " +
                     "Use architect_* tools to build (structure, production, furniture, power, security, " +
                     "misc, floors, ship, temperature, joy) — call list_buildables first to see available items. " +
                     "Use architect_orders for mining, harvesting, hauling, hunting, deconstructing, and more. " +
                     "Use architect_zone for stockpiles, growing zones, and area management. " +
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
-                    "Areas highlighted in red in screenshots belong to other colonists — do not build, zone, or place orders in red areas. " +
-                    "You can only interact with your own colonists — visitors, traders, and NPCs on the map cannot be controlled. " +
-                    "Before placing buildings, use scan_area to check for existing walls, blueprints, and open space. " +
-                    "Scan results show blueprints and frames so you can see what's already been placed. " +
-                    "Focus on building, farming, crafting, and researching to grow the colony.";
+                    "Areas highlighted in red in screenshots belong to other colonists — do not build there. " +
+                    "You can only interact with your own colonists — visitors and NPCs cannot be controlled. " +
+                    "BUILDING RULES: " +
+                    "Finish one room before starting another. " +
+                    "A room needs 4 walls forming a rectangle, exactly 1 door, then furniture inside. " +
+                    "If the status says 'Room is INCOMPLETE', fix gaps before building anything else. " +
+                    "If a door is BLOCKED, cancel the blocking blueprint with architect_orders cancel. " +
+                    "Place workbenches INSIDE rooms with clearance in front — never outdoors. " +
+                    "Before placing buildings, use scan_area to check for existing blueprints. " +
+                    "Be patient — construction and research take time. Don't change work priorities unless something is wrong.";
+
+                userParts.Add(ContentPart.FromText(
+                    "Begin. Screenshot attached — you are at center (0,0). " +
+                    "+X=east (right), +Z=north (up). You are currently " + currentActivity + ".\n\n" +
+                    context + "\n\nReview the CRITICAL ISSUES first if any, then act."));
 
                 agentConversation = new List<ChatMessage>
                 {
                     new ChatMessage("system", sysPrompt),
-                    new ChatMessage("user", "Begin. You are currently " + currentActivity + ".\n\n" +
-                        context + "\n\nTake a screenshot to observe your surroundings, then decide what to do.")
+                    new ChatMessage("user", userParts)
                 };
             }
             else
@@ -158,10 +212,12 @@ namespace RimBot
                         "I've used all my actions for this cycle. I'll reassess the situation next cycle."));
                 }
 
-                agentConversation.Add(new ChatMessage("user",
-                    "Continue. " + elapsedSeconds + " seconds have passed. You are currently " +
-                    currentActivity + ".\n\n" + context +
-                    "\n\nTake a screenshot to see your surroundings and decide what to do next."));
+                userParts.Add(ContentPart.FromText(
+                    "Continue. " + elapsedSeconds + "s elapsed. Screenshot attached. " +
+                    "You are currently " + currentActivity + ".\n\n" + context +
+                    "\n\nReview the CRITICAL ISSUES first if any, then act."));
+
+                agentConversation.Add(new ChatMessage("user", userParts));
             }
 
             var messages = new List<ChatMessage>(agentConversation);
@@ -299,7 +355,7 @@ namespace RimBot
         /// Builds a context string with pawn status, nearby objects, resources, and research.
         /// Called on main thread before launching the agent loop.
         /// </summary>
-        private static string BuildContext(Pawn pawn, Map map)
+        private string BuildContext(Pawn pawn, Map map)
         {
             var sb = new StringBuilder();
 
@@ -490,10 +546,98 @@ namespace RimBot
             if (hasStockpile) infra.Add("stockpile");
             if (hasGrowingZone) infra.Add("growing zone");
             if (infra.Count > 0)
-                sb.AppendLine("You already have: " + string.Join(", ", infra) + ". Do not rebuild these.");
+                sb.AppendLine("You already have (built or blueprinted): " + string.Join(", ", infra) + ". Do not rebuild these.");
 
             // --- Nearby structures (helps bot complete rooms across cycles) ---
             AppendNearbyStructures(sb, pawn, map);
+
+            // --- Current job + queue ---
+            if (pawn.jobs != null)
+            {
+                if (pawn.CurJob != null)
+                {
+                    string jobDesc = pawn.CurJob.def.reportString;
+                    if (string.IsNullOrEmpty(jobDesc)) jobDesc = pawn.CurJob.def.label;
+                    if (pawn.CurJob.targetA.HasThing)
+                        jobDesc += " (" + pawn.CurJob.targetA.Thing.LabelShort + ")";
+                    sb.AppendLine("Current job: " + jobDesc + ".");
+                }
+                if (pawn.jobs.jobQueue != null && pawn.jobs.jobQueue.Count > 0)
+                {
+                    var queueItems = new List<string>();
+                    foreach (var qj in pawn.jobs.jobQueue)
+                        queueItems.Add(qj.job.def.label);
+                    sb.AppendLine("Job queue: " + string.Join(", ", queueItems) + ".");
+                }
+            }
+
+            // --- Current work priorities (set by you) ---
+            if (pawn.workSettings != null)
+            {
+                var highWork = new List<string>();
+                foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
+                {
+                    if (!pawn.WorkTypeIsDisabled(wt) && pawn.workSettings.GetPriority(wt) <= 2)
+                        highWork.Add(wt.labelShort);
+                }
+                if (highWork.Count > 0)
+                    sb.AppendLine("Work priorities you set to HIGH: " + string.Join(", ", highWork) +
+                        ". All other work is active at low priority.");
+                else
+                    sb.AppendLine("All work is at low (default) priority. No high-priority work set by you.");
+            }
+
+            // --- Active alerts from the game ---
+            try
+            {
+                var uiRoot = Find.UIRoot as UIRoot_Play;
+                if (uiRoot != null)
+                {
+                    var alertsReadout = uiRoot.alerts;
+                    if (alertsReadout != null)
+                    {
+                        var activeAlerts = Traverse.Create(alertsReadout).Field("activeAlerts").GetValue<List<Alert>>();
+                        if (activeAlerts != null && activeAlerts.Count > 0)
+                        {
+                            var alertTexts = new List<string>();
+                            foreach (var alert in activeAlerts)
+                            {
+                                string label2 = alert.GetLabel();
+                                if (!string.IsNullOrEmpty(label2))
+                                    alertTexts.Add(label2);
+                            }
+                            if (alertTexts.Count > 0)
+                                sb.AppendLine("GAME ALERTS: " + string.Join("; ", alertTexts) + ".");
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // --- New letters since last cycle ---
+            try
+            {
+                var letterStack = Find.LetterStack;
+                if (letterStack != null)
+                {
+                    var letters = Traverse.Create(letterStack).Field("letters").GetValue<List<Letter>>();
+                    if (letters != null)
+                    {
+                        int currentTick = Find.TickManager.TicksGame;
+                        var newLetters = new List<string>();
+                        foreach (var letter in letters)
+                        {
+                            int receivedTick = Traverse.Create(letter).Field("arrivalTick").GetValue<int>();
+                            if (receivedTick > lastLetterTick)
+                                newLetters.Add(letter.Label);
+                        }
+                        lastLetterTick = currentTick;
+                        if (newLetters.Count > 0)
+                            sb.AppendLine("NEW EVENTS: " + string.Join("; ", newLetters) + ".");
+                    }
+                }
+            }
+            catch { }
 
             // --- Day ---
             float daysPassed = Find.TickManager.TicksGame / 60000f;
