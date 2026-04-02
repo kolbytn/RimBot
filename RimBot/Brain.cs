@@ -395,13 +395,27 @@ namespace RimBot
             if (!hasGrowingZone)
                 warnings.Add("No growing zones — create a growing zone with architect_zone to farm food.");
 
-            // Research: check for research bench
+            // Research: check for bench and work priority
             if (currentResearch != null && currentResearch.ProgressPercent < 0.01f)
             {
                 bool hasResearchBench = HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench");
                 if (!hasResearchBench)
                     warnings.Add("Research is set but you have NO research bench — build a simple research bench (production category) so research can progress.");
+                else if (pawn.workSettings != null)
+                {
+                    var researchWork = DefDatabase<WorkTypeDef>.GetNamed("Research", false);
+                    if (researchWork != null && pawn.workSettings.GetPriority(researchWork) == 0)
+                        warnings.Add("Research bench exists but research work is DISABLED. Use set_work_priority to enable research.");
+                    else if (researchWork != null && pawn.workSettings.GetPriority(researchWork) > 3)
+                        warnings.Add("Research work priority is low (" + pawn.workSettings.GetPriority(researchWork) + "). Set it to 1 or 2 to make progress.");
+                }
             }
+
+            // Incapable colonist warnings
+            if (pawn.WorkTypeIsDisabled(DefDatabase<WorkTypeDef>.GetNamed("Construction", false)))
+                warnings.Add("You are INCAPABLE of construction — blueprints you place must be built by other colonists. Focus on other tasks.");
+            if (pawn.WorkTypeIsDisabled(DefDatabase<WorkTypeDef>.GetNamed("Cooking", false)) && !hasStove)
+                warnings.Add("You are incapable of cooking — another colonist must cook for you.");
 
             // Shelter: check for bed
             bool hasBed = HasBuilding(map, "Bed") || HasBuilding(map, "DoubleBed") || HasBuilding(map, "RoyalBed");
@@ -417,6 +431,45 @@ namespace RimBot
             if (!hasStockpile)
                 warnings.Add("No stockpile zone — create one with architect_zone so items can be hauled and organized.");
 
+            // Blocked doors — check for impassable things/blueprints adjacent to doors
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing.Faction != Faction.OfPlayer) continue;
+                bool isDoor = thing.def.IsDoor;
+                if (!isDoor && thing is Blueprint dbp && dbp.def.entityDefToBuild is ThingDef dd && dd.IsDoor) isDoor = true;
+                if (!isDoor) continue;
+
+                float dist = (thing.Position - pawn.Position).LengthHorizontalSquared;
+                if (dist > 25 * 25) continue; // only check nearby doors
+
+                foreach (var adj in GenAdj.CardinalDirections)
+                {
+                    var adjCell = thing.Position + adj;
+                    if (!adjCell.InBounds(map)) continue;
+                    foreach (var adjThing in adjCell.GetThingList(map))
+                    {
+                        if (adjThing == thing) continue;
+                        string blocker = null;
+                        if (adjThing.def.passability == Traversability.Impassable && !adjThing.def.IsDoor)
+                            blocker = adjThing.def.label;
+                        else if (adjThing is Blueprint abp)
+                        {
+                            var adef = abp.def.entityDefToBuild as ThingDef;
+                            if (adef != null && !adef.IsDoor && (adef.passability == Traversability.Impassable || adef.fillPercent > 0.3f))
+                                blocker = adef.label + " blueprint";
+                        }
+                        if (blocker != null)
+                        {
+                            int rx = thing.Position.x - pawn.Position.x;
+                            int rz = thing.Position.z - pawn.Position.z;
+                            warnings.Add("Door at (" + rx + "," + rz + ") is BLOCKED by " + blocker +
+                                ". Use architect_orders cancel to remove the blocking blueprint.");
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (warnings.Count > 0)
             {
                 sb.AppendLine("CRITICAL ISSUES:");
@@ -425,12 +478,15 @@ namespace RimBot
             }
 
             // --- Existing infrastructure (prevents re-placing after conversation trim) ---
-            // Only list items the bot tends to duplicate: production buildings and zones
+            // Check both completed buildings AND blueprints/frames
             var infra = new List<string>();
-            if (hasStove) infra.Add("cook stove");
-            if (hasButcher) infra.Add("butcher table");
-            bool hasResearchBenchInfra = HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench");
-            if (hasResearchBenchInfra) infra.Add("research bench");
+            if (hasStove || HasBlueprintOrFrame(map, "FueledStove") || HasBlueprintOrFrame(map, "ElectricStove"))
+                infra.Add("cook stove");
+            if (hasButcher || HasBlueprintOrFrame(map, "TableButcher"))
+                infra.Add("butcher table");
+            if (HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench") ||
+                HasBlueprintOrFrame(map, "SimpleResearchBench") || HasBlueprintOrFrame(map, "HiTechResearchBench"))
+                infra.Add("research bench");
             if (hasStockpile) infra.Add("stockpile");
             if (hasGrowingZone) infra.Add("growing zone");
             if (infra.Count > 0)
@@ -459,6 +515,20 @@ namespace RimBot
             var def = DefDatabase<ThingDef>.GetNamed(defName, false);
             if (def == null) return false;
             return map.listerBuildings.ColonistsHaveBuilding(def);
+        }
+
+        private static bool HasBlueprintOrFrame(Map map, string defName)
+        {
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing.Faction != Faction.OfPlayer) continue;
+                BuildableDef target = null;
+                if (thing is Blueprint bp) target = bp.def.entityDefToBuild;
+                else if (thing is Frame fr) target = fr.def.entityDefToBuild;
+                if (target != null && target.defName == defName)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>
