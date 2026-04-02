@@ -57,6 +57,7 @@ namespace RimBot
             lastSnapshotTick = -1;
             lastSummaryTick = -1;
             initialized = false;
+            SpatialEvaluator.Reset();
         }
 
         // --- Recording methods (called from various places) ---
@@ -168,6 +169,8 @@ namespace RimBot
                 lastSummaryTick = tick;
                 LogMetricsSummary(tick);
             }
+
+            SpatialEvaluator.Tick();
         }
 
         // --- Snapshot: current game state ---

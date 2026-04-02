@@ -102,6 +102,7 @@
     <Compile Include="ScreenshotCapture.cs" />
     <Compile Include="AgentRunner.cs" />
     <Compile Include="MetricsTracker.cs" />
+    <Compile Include="SpatialEvaluator.cs" />
     <Compile Include="Tools\ToolTypes.cs" />
     <Compile Include="Tools\GetScreenshotTool.cs" />
     <Compile Include="Tools\ArchitectBuildTool.cs" />

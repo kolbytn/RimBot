@@ -36,6 +36,10 @@ namespace RimBot
         private const float ErrorPauseSeconds = 30f;
         public IReadOnlyList<HistoryEntry> History => history;
 
+        // Screenshots saved alongside Player.log for spatial debugging
+        private static readonly string ScreenshotSaveDir =
+            System.IO.Path.Combine(Application.persistentDataPath, "RimBot_Screenshots");
+
         public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, string profileId = null)
         {
             PawnId = pawnId;
@@ -532,6 +536,24 @@ namespace RimBot
                 CacheReadTokens = turn.CacheReadTokens,
                 ReasoningTokens = turn.ReasoningTokens
             };
+
+            // Save screenshot to tmp/screenshots/ for spatial debugging
+            if (!string.IsNullOrEmpty(screenshotBase64))
+            {
+                try
+                {
+                    string dir = System.IO.Path.Combine(ScreenshotSaveDir, PawnLabel);
+                    System.IO.Directory.CreateDirectory(dir);
+                    float day = Find.TickManager.TicksGame / 60000f;
+                    string filename = string.Format("day{0:F1}_iter{1}.png", day, iterIndex + 1);
+                    byte[] pngBytes = Convert.FromBase64String(screenshotBase64);
+                    System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, filename), pngBytes);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning("[RimBot] Failed to save screenshot: " + ex.Message);
+                }
+            }
 
             history.Insert(0, entry);
 
