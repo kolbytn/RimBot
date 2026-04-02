@@ -69,29 +69,34 @@ namespace RimBot.Tools
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine("=== Work Priorities for " + pawn.LabelShort + " ===");
+            var highPriority = new List<string>();
+            var lowPriority = new List<string>();
+            var incapable = new List<string>();
 
-            if (pawn.workSettings == null)
-            {
-                sb.AppendLine("No work settings available.");
-            }
-            else
+            if (pawn.workSettings != null)
             {
                 foreach (var workType in DefDatabase<WorkTypeDef>.AllDefs)
                 {
-                    bool disabled = pawn.WorkTypeIsDisabled(workType);
-                    if (disabled)
+                    if (pawn.WorkTypeIsDisabled(workType))
                     {
-                        sb.AppendLine("  " + workType.labelShort + ": PERMANENTLY DISABLED (incapable)");
+                        incapable.Add(workType.labelShort);
                     }
                     else
                     {
                         int priority = pawn.workSettings.GetPriority(workType);
-                        string status = priority == 0 ? "off" : priority.ToString();
-                        sb.AppendLine("  " + workType.labelShort + ": " + status);
+                        if (priority >= 1 && priority <= 2)
+                            highPriority.Add(workType.labelShort);
+                        else
+                            lowPriority.Add(workType.labelShort);
                     }
                 }
             }
+
+            sb.AppendLine("=== Currently Set Work Priorities for " + pawn.LabelShort + " ===");
+            sb.AppendLine("HIGH priority: " + (highPriority.Count > 0 ? string.Join(", ", highPriority) : "none"));
+            sb.AppendLine("LOW priority (background): " + string.Join(", ", lowPriority));
+            if (incapable.Count > 0)
+                sb.AppendLine("INCAPABLE: " + string.Join(", ", incapable));
 
             onComplete(new ToolResult
             {

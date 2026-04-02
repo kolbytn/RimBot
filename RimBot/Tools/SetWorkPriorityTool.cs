@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Newtonsoft.Json.Linq;
 using RimWorld;
 using Verse;
@@ -10,79 +11,130 @@ namespace RimBot.Tools
     {
         public string Name => "set_work_priority";
 
+        private const int HighPriority = 1;
+        private const int LowPriority = 3;
+
         public ToolDefinition GetDefinition()
         {
             return new ToolDefinition
             {
                 Name = Name,
-                Description = "Set your own priority for a specific work type. " +
-                    "Priority 0 disables the work type, 1 is highest priority, 4 is lowest.",
+                Description = "Set work types to high or low priority. All work is always active at low priority. " +
+                    "Use this to promote specific work types to high priority based on current needs. " +
+                    "You can set multiple work types at once.",
                 ParametersJson = "{\"type\":\"object\",\"properties\":{" +
-                    "\"work_type\":{\"type\":\"string\",\"description\":\"Work type name (e.g. Mining, Cooking, Construction, Growing, etc.)\"}," +
-                    "\"priority\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4,\"description\":\"Priority level: 0=disabled, 1=highest, 4=lowest\"}}" +
-                    ",\"required\":[\"work_type\",\"priority\"]}"
+                    "\"work_types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}," +
+                    "\"description\":\"Work type names to change (e.g. ['Construction', 'Research', 'Cook'])\"}," +
+                    "\"level\":{\"type\":\"string\",\"enum\":[\"high\",\"low\"]," +
+                    "\"description\":\"high = top priority, low = background priority (default)\"}}" +
+                    ",\"required\":[\"work_types\",\"level\"]}"
             };
         }
 
         public void Execute(ToolCall call, ToolContext context, Action<ToolResult> onComplete)
         {
-            string workTypeName = call.Arguments["work_type"]?.Value<string>();
-            if (string.IsNullOrEmpty(workTypeName))
+            // Support both old single-value format and new array format
+            var workTypeNames = new List<string>();
+            var typesArg = call.Arguments["work_types"];
+            if (typesArg is JArray arr)
+            {
+                foreach (var item in arr)
+                    workTypeNames.Add(item.Value<string>());
+            }
+            // Fallback: old format with single "work_type" string
+            if (workTypeNames.Count == 0)
+            {
+                var singleArg = call.Arguments["work_type"]?.Value<string>();
+                if (!string.IsNullOrEmpty(singleArg))
+                    workTypeNames.Add(singleArg);
+            }
+
+            if (workTypeNames.Count == 0)
             {
                 onComplete(new ToolResult
                 {
                     ToolCallId = call.Id,
                     ToolName = Name,
                     Success = false,
-                    Content = "work_type parameter is required."
+                    Content = "work_types parameter is required."
                 });
                 return;
             }
 
-            int priority = call.Arguments["priority"]?.Value<int>() ?? -1;
-            if (priority < 0 || priority > 4)
-            {
-                onComplete(new ToolResult
-                {
-                    ToolCallId = call.Id,
-                    ToolName = Name,
-                    Success = false,
-                    Content = "priority must be 0-4."
-                });
-                return;
-            }
+            string level = call.Arguments["level"]?.Value<string>()?.ToLower() ?? "high";
+            // Fallback: old format with numeric "priority"
+            var priorityArg = call.Arguments["priority"];
+            if (priorityArg != null)
+                level = priorityArg.Value<int>() <= 2 ? "high" : "low";
 
-            Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] set_work_priority(" + workTypeName + ", " + priority + ")");
+            int targetPriority = level == "high" ? HighPriority : LowPriority;
 
             var pawn = BrainManager.FindPawnById(context.PawnId);
             if (pawn == null || !pawn.Spawned)
             {
                 onComplete(new ToolResult
                 {
-                    ToolCallId = call.Id,
-                    ToolName = Name,
-                    Success = false,
+                    ToolCallId = call.Id, ToolName = Name, Success = false,
                     Content = "Pawn not found or not spawned."
                 });
                 return;
             }
 
-            // Find the work type def — normalize: lowercase, strip spaces/underscores
-            // Then try synonyms, then gerund suffix stripping
-            WorkTypeDef workDef = null;
-            string normalized = ResolveSynonym(workTypeName.ToLower().Replace(" ", "").Replace("_", ""));
+            var results = new List<string>();
+            int changed = 0;
+
+            foreach (var workTypeName in workTypeNames)
+            {
+                var workDef = ResolveWorkType(workTypeName);
+                if (workDef == null)
+                {
+                    results.Add(workTypeName + ": unknown");
+                    continue;
+                }
+                if (pawn.WorkTypeIsDisabled(workDef))
+                {
+                    results.Add(workDef.labelShort + ": incapable");
+                    continue;
+                }
+
+                int currentPriority = pawn.workSettings.GetPriority(workDef);
+                if (currentPriority == targetPriority)
+                {
+                    results.Add(workDef.labelShort + ": already " + level);
+                    continue;
+                }
+
+                pawn.workSettings.SetPriority(workDef, targetPriority);
+                results.Add(workDef.labelShort + ": → " + level);
+                changed++;
+            }
+
+            Log.Message("[RimBot] [AGENT] [" + context.PawnLabel + "] set_work_priority(" +
+                string.Join(", ", workTypeNames) + " → " + level + "): " + changed + " changed");
+
+            onComplete(new ToolResult
+            {
+                ToolCallId = call.Id,
+                ToolName = Name,
+                Success = true,
+                Content = string.Join("; ", results)
+            });
+        }
+
+        private static WorkTypeDef ResolveWorkType(string name)
+        {
+            string normalized = ResolveSynonym(name.ToLower().Replace(" ", "").Replace("_", ""));
+
             foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
             {
                 string normDef = wt.defName.ToLower().Replace(" ", "").Replace("_", "");
                 string normLabel = wt.labelShort.ToLower().Replace(" ", "").Replace("_", "");
                 if (normDef == normalized || normLabel == normalized)
-                {
-                    workDef = wt;
-                    break;
-                }
+                    return wt;
             }
-            // Strip gerund suffix and retry: "constructing" → "construct", "researching" → "research"
-            if (workDef == null && normalized.Length > 4 && normalized.EndsWith("ing"))
+
+            // Strip gerund suffix: "constructing" → "construct"
+            if (normalized.Length > 4 && normalized.EndsWith("ing"))
             {
                 string stemmed = normalized.Substring(0, normalized.Length - 3);
                 foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
@@ -91,50 +143,11 @@ namespace RimBot.Tools
                     string normLabel = wt.labelShort.ToLower().Replace(" ", "").Replace("_", "");
                     if (normDef == stemmed || normLabel == stemmed ||
                         normDef.StartsWith(stemmed) || normLabel.StartsWith(stemmed))
-                    {
-                        workDef = wt;
-                        break;
-                    }
+                        return wt;
                 }
             }
 
-            if (workDef == null)
-            {
-                var available = new System.Collections.Generic.List<string>();
-                foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
-                    available.Add(wt.labelShort);
-                onComplete(new ToolResult
-                {
-                    ToolCallId = call.Id,
-                    ToolName = Name,
-                    Success = false,
-                    Content = "Unknown work type '" + workTypeName + "'. Available: " + string.Join(", ", available)
-                });
-                return;
-            }
-
-            if (pawn.WorkTypeIsDisabled(workDef))
-            {
-                onComplete(new ToolResult
-                {
-                    ToolCallId = call.Id,
-                    ToolName = Name,
-                    Success = false,
-                    Content = pawn.LabelShort + " is permanently incapable of " + workDef.labelShort + "."
-                });
-                return;
-            }
-
-            pawn.workSettings.SetPriority(workDef, priority);
-
-            string statusLabel = priority == 0 ? "disabled" : "priority " + priority;
-            onComplete(new ToolResult
-            {
-                ToolCallId = call.Id,
-                ToolName = Name,
-                Success = true,
-                Content = "Set " + pawn.LabelShort + "'s " + workDef.labelShort + " to " + statusLabel + "."
-            });
+            return null;
         }
 
         private static readonly Dictionary<string, string> Synonyms = new Dictionary<string, string>
