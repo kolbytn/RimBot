@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using RimBot.Models;
 using RimBot.Tools;
+using RimWorld;
 using UnityEngine;
 using Verse;
 
@@ -13,7 +15,7 @@ namespace RimBot
         private enum State { Idle, WaitingForLLM }
 
         public int PawnId { get; }
-        public string PawnLabel { get; }
+        public string PawnLabel { get; private set; }
         public LLMProviderType Provider { get; }
         public string Model { get; }
         public string ApiKey { get; }
@@ -84,6 +86,13 @@ namespace RimBot
                 return;
             }
 
+            // Refresh label in case pawn's nickname changed
+            if (pawn.LabelShort != PawnLabel)
+            {
+                Log.Message("[RimBot] [AGENT] Pawn label changed: " + PawnLabel + " -> " + pawn.LabelShort);
+                PawnLabel = pawn.LabelShort;
+            }
+
             var pawnPos = pawn.Position;
             var map = Find.CurrentMap;
 
@@ -99,6 +108,7 @@ namespace RimBot
                 currentActivity = "mental break: " + pawn.MentalState.def.label;
 
             bool isFirstCycle = agentConversation == null;
+            var context = BuildContext(pawn, map);
 
             if (isFirstCycle)
             {
@@ -114,13 +124,14 @@ namespace RimBot
                     "Use architect_zone for stockpiles, growing zones, and area management. " +
                     "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
                     "Areas highlighted in red in screenshots belong to other colonists — do not build, zone, or place orders in red areas. " +
-                    "Build rooms, expand the colony, and make decisions as you see fit.";
+                    "You can only interact with your own colonists — visitors, traders, and NPCs on the map cannot be controlled. " +
+                    "Focus on building, farming, crafting, and researching to grow the colony.";
 
                 agentConversation = new List<ChatMessage>
                 {
                     new ChatMessage("system", sysPrompt),
-                    new ChatMessage("user", "Begin. You are currently " + currentActivity +
-                        ". Take a screenshot to observe your surroundings, then decide what to do.")
+                    new ChatMessage("user", "Begin. You are currently " + currentActivity + ".\n\n" +
+                        context + "\n\nTake a screenshot to observe your surroundings, then decide what to do.")
                 };
             }
             else
@@ -143,7 +154,8 @@ namespace RimBot
 
                 agentConversation.Add(new ChatMessage("user",
                     "Continue. " + elapsedSeconds + " seconds have passed. You are currently " +
-                    currentActivity + ". Take a screenshot to see your surroundings and decide what to do next."));
+                    currentActivity + ".\n\n" + context +
+                    "\n\nTake a screenshot to see your surroundings and decide what to do next."));
             }
 
             var messages = new List<ChatMessage>(agentConversation);
@@ -174,17 +186,34 @@ namespace RimBot
                     var result = await AgentRunner.RunAgent(
                         this, messages, tools, llmModel, model, apiKey, maxTokens, thinkingLevel, toolContext, onTurnComplete);
 
+                    float cycleDuration = Time.realtimeSinceStartup - lastRunStartedAt;
+
                     BrainManager.EnqueueMainThread(() =>
                     {
                         if (result.Success)
                         {
+                            // Aggregate token counts across all turns
+                            int cycleInput = 0, cycleOutput = 0, cycleCache = 0, cycleReasoning = 0;
+                            foreach (var turn in result.Turns)
+                            {
+                                cycleInput += turn.InputTokens;
+                                cycleOutput += turn.OutputTokens;
+                                cycleCache += turn.CacheReadTokens;
+                                cycleReasoning += turn.ReasoningTokens;
+                            }
+
                             Log.Message("[RimBot] [AGENT] [" + label + "] Completed in " +
                                 result.Turns.Count + " iterations");
+
+                            MetricsTracker.RecordAgentCycleComplete(label, result.Turns.Count,
+                                cycleInput, cycleOutput, cycleCache, cycleReasoning, cycleDuration);
                         }
                         else
                         {
                             Log.Warning("[RimBot] [AGENT] [" + label + "] Failed: " +
                                 result.ErrorMessage);
+
+                            MetricsTracker.RecordAgentCycleError(label, result.ErrorMessage);
 
                             // Pause on rate limit or persistent API errors
                             if (IsRateLimitError(result.ErrorMessage))
@@ -258,6 +287,169 @@ namespace RimBot
 
             agentConversation = trimmed;
             Log.Message("[RimBot] [AGENT] [" + PawnLabel + "] Trimmed conversation to " + agentConversation.Count + " messages");
+        }
+
+        /// <summary>
+        /// Builds a context string with pawn status, nearby objects, resources, and research.
+        /// Called on main thread before launching the agent loop.
+        /// </summary>
+        private static string BuildContext(Pawn pawn, Map map)
+        {
+            var sb = new StringBuilder();
+
+            // --- Pawn needs ---
+            sb.Append("Your status: ");
+            if (pawn.needs != null)
+            {
+                var parts = new List<string>();
+                if (pawn.needs.food != null)
+                    parts.Add("food " + (pawn.needs.food.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.rest != null)
+                    parts.Add("rest " + (pawn.needs.rest.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.mood != null)
+                    parts.Add("mood " + (pawn.needs.mood.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.joy != null)
+                    parts.Add("joy " + (pawn.needs.joy.CurLevelPercentage * 100).ToString("F0") + "%");
+                sb.Append(string.Join(", ", parts));
+            }
+            float healthPct = pawn.health.summaryHealth.SummaryHealthPercent;
+            if (healthPct < 1f)
+                sb.Append(", health " + (healthPct * 100).ToString("F0") + "%");
+            sb.AppendLine(".");
+
+            // --- Equipment ---
+            if (pawn.equipment?.Primary != null)
+                sb.AppendLine("Weapon: " + pawn.equipment.Primary.def.label);
+
+            // --- Key resources ---
+            sb.Append("Colony resources: ");
+            var resParts = new List<string>();
+            AppendResource(resParts, map, ThingDefOf.WoodLog, "wood");
+            AppendResource(resParts, map, ThingDefOf.Steel, "steel");
+            AppendResource(resParts, map, ThingDefOf.ComponentIndustrial, "components");
+            AppendResource(resParts, map, ThingDefOf.Silver, "silver");
+            AppendResource(resParts, map, ThingDefOf.MealSimple, "simple meals");
+            AppendResource(resParts, map, ThingDefOf.MealFine, "fine meals");
+            if (resParts.Count > 0)
+                sb.AppendLine(string.Join(", ", resParts) + ".");
+            else
+                sb.AppendLine("none stockpiled.");
+
+            // --- Research ---
+            var currentResearch = Find.ResearchManager.GetProject();
+            if (currentResearch != null)
+            {
+                sb.AppendLine("Research: " + currentResearch.label +
+                    " (" + (currentResearch.ProgressPercent * 100).ToString("F0") + "% done).");
+            }
+            else
+            {
+                sb.AppendLine("Research: NONE SELECTED — use list_research and set_research to advance technology.");
+            }
+
+            // --- Colonist count ---
+            var colonists = map.mapPawns.FreeColonistsSpawned;
+            if (colonists.Count > 1)
+            {
+                var names = new List<string>();
+                foreach (var c in colonists)
+                {
+                    if (c.thingIDNumber != pawn.thingIDNumber)
+                        names.Add(c.LabelShort);
+                }
+                sb.AppendLine("Fellow colonists: " + string.Join(", ", names) + ".");
+            }
+
+            // --- Threats ---
+            int fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire).Count;
+            if (fires > 0)
+                sb.AppendLine("WARNING: " + fires + " active fires!");
+
+            // --- Critical infrastructure warnings ---
+            var warnings = new List<string>();
+
+            // Food: check for meals and cooking infrastructure
+            int meals = map.resourceCounter.GetCount(ThingDefOf.MealSimple)
+                      + map.resourceCounter.GetCount(ThingDefOf.MealFine);
+            bool hasStove = HasBuilding(map, "FueledStove") || HasBuilding(map, "ElectricStove");
+            bool hasButcher = HasBuilding(map, "TableButcher");
+            bool hasGrowingZone = false;
+            foreach (var zone in map.zoneManager.AllZones)
+            {
+                if (zone is Zone_Growing) { hasGrowingZone = true; break; }
+            }
+
+            if (meals == 0 && !hasStove)
+                warnings.Add("NO MEALS and no cook stove — you will starve. Build a fueled stove (production category) and a butcher table urgently.");
+            else if (meals == 0)
+                warnings.Add("NO MEALS — cook food at your stove immediately.");
+            else if (meals < 5)
+                warnings.Add("Low meals (" + meals + ") — prioritize cooking.");
+
+            if (!hasGrowingZone)
+                warnings.Add("No growing zones — create a growing zone with architect_zone to farm food.");
+
+            // Research: check for research bench
+            if (currentResearch != null && currentResearch.ProgressPercent < 0.01f)
+            {
+                bool hasResearchBench = HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench");
+                if (!hasResearchBench)
+                    warnings.Add("Research is set but you have NO research bench — build a simple research bench (production category) so research can progress.");
+            }
+
+            // Shelter: check for bed
+            bool hasBed = HasBuilding(map, "Bed") || HasBuilding(map, "DoubleBed") || HasBuilding(map, "RoyalBed");
+            if (!hasBed)
+                warnings.Add("No bed — build a bed inside a roofed room to avoid mood penalties.");
+
+            // Stockpile
+            bool hasStockpile = false;
+            foreach (var zone in map.zoneManager.AllZones)
+            {
+                if (zone is Zone_Stockpile) { hasStockpile = true; break; }
+            }
+            if (!hasStockpile)
+                warnings.Add("No stockpile zone — create one with architect_zone so items can be hauled and organized.");
+
+            if (warnings.Count > 0)
+            {
+                sb.AppendLine("CRITICAL ISSUES:");
+                foreach (var w in warnings)
+                    sb.AppendLine("  - " + w);
+            }
+
+            // --- Existing infrastructure (prevents re-placing after conversation trim) ---
+            // Only list items the bot tends to duplicate: production buildings and zones
+            var infra = new List<string>();
+            if (hasStove) infra.Add("cook stove");
+            if (hasButcher) infra.Add("butcher table");
+            bool hasResearchBenchInfra = HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench");
+            if (hasResearchBenchInfra) infra.Add("research bench");
+            if (hasStockpile) infra.Add("stockpile");
+            if (hasGrowingZone) infra.Add("growing zone");
+            if (infra.Count > 0)
+                sb.AppendLine("You already have: " + string.Join(", ", infra) + ". Do not rebuild these.");
+
+            // --- Day ---
+            float daysPassed = Find.TickManager.TicksGame / 60000f;
+            sb.AppendLine("Colony day: " + daysPassed.ToString("F1") + ".");
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static void AppendResource(List<string> parts, Map map, ThingDef def, string label)
+        {
+            if (def == null) return;
+            int count = map.resourceCounter.GetCount(def);
+            if (count > 0)
+                parts.Add(count + " " + label);
+        }
+
+        private static bool HasBuilding(Map map, string defName)
+        {
+            var def = DefDatabase<ThingDef>.GetNamed(defName, false);
+            if (def == null) return false;
+            return map.listerBuildings.ColonistsHaveBuilding(def);
         }
 
         private void RecordSingleTurn(AgentTurn turn, int iterIndex, string systemPrompt)
