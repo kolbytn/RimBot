@@ -32,7 +32,10 @@ namespace RimBot.Tools
             {
                 Name = Name,
                 Description = "List available buildable items for a given architect category. " +
-                    "Shows defName, label, and research status. Use this to find valid item names for architect_* tools.",
+                    "Shows defName, label, size, and research status. " +
+                    "Multi-tile items show [WxH] — the coordinate you specify is the bottom-left corner. " +
+                    "Rotation 0=north changes which direction the item faces. " +
+                    "Items marked [needs clear tile in front] are workbenches that need space for a colonist to stand.",
                 ParametersJson = "{\"type\":\"object\",\"properties\":{" +
                     "\"category\":{\"type\":\"string\",\"enum\":" + enumJson + "," +
                     "\"description\":\"The architect category to list\"}}" +
@@ -79,6 +82,14 @@ namespace RimBot.Tools
 
                 string lockedReason = GetLockedReason(td.researchPrerequisites);
                 string entry = td.defName + " — " + (td.label ?? td.defName);
+
+                // Add size info for multi-tile buildings
+                if (td.size.x > 1 || td.size.z > 1)
+                    entry += " [" + td.size.x + "x" + td.size.z + ", use rotation to orient]";
+
+                // Note interaction cell requirement for workbenches
+                if (td.hasInteractionCell)
+                    entry += " [needs clear tile in front]";
 
                 if (lockedReason != null)
                     locked.Add(entry + " [LOCKED: needs " + lockedReason + "]");
