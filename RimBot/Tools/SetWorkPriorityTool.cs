@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using RimWorld;
 using Verse;
@@ -67,9 +68,9 @@ namespace RimBot.Tools
             }
 
             // Find the work type def — normalize: lowercase, strip spaces/underscores
-            // Then try again with gerund suffix stripped from input ("Constructing" → "construct")
+            // Then try synonyms, then gerund suffix stripping
             WorkTypeDef workDef = null;
-            string normalized = workTypeName.ToLower().Replace(" ", "").Replace("_", "");
+            string normalized = ResolveSynonym(workTypeName.ToLower().Replace(" ", "").Replace("_", ""));
             foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
             {
                 string normDef = wt.defName.ToLower().Replace(" ", "").Replace("_", "");
@@ -136,5 +137,29 @@ namespace RimBot.Tools
             });
         }
 
+        private static readonly Dictionary<string, string> Synonyms = new Dictionary<string, string>
+        {
+            { "medical", "doctor" },
+            { "medic", "doctor" },
+            { "healing", "doctor" },
+            { "farming", "grow" },
+            { "cooking", "cook" },
+            { "building", "construct" },
+            { "woodcutting", "plantcut" },
+            { "chopping", "plantcut" },
+            { "smithing", "smith" },
+            { "sewing", "tailor" },
+            { "tailoring", "tailor" },
+            { "crafting", "craft" },
+            { "sweeping", "clean" },
+        };
+
+        private static string ResolveSynonym(string normalized)
+        {
+            string value;
+            if (Synonyms.TryGetValue(normalized, out value))
+                return value;
+            return normalized;
+        }
     }
 }

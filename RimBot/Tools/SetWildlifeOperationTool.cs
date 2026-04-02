@@ -45,9 +45,11 @@ namespace RimBot.Tools
             var map = context.Map;
             var dm = map.designationManager;
 
-            // Find wild animal by name or label
+            // Find wild animal by exact name, species label, or normalized species match
             Pawn animal = null;
             string lower = animalName.ToLower();
+            // Strip trailing numbers/IDs that the LLM sometimes appends (e.g. "Gazelle 58284")
+            string stripped = System.Text.RegularExpressions.Regex.Replace(lower, @"\s*\d+$", "");
             var wildNames = new List<string>();
 
             foreach (var p in map.mapPawns.AllPawnsSpawned)
@@ -58,7 +60,8 @@ namespace RimBot.Tools
                 string name = p.Name != null ? p.Name.ToStringShort : p.LabelShort;
                 wildNames.Add(name + " (" + p.def.label + ")");
 
-                if (name.ToLower() == lower || p.def.label.ToLower() == lower)
+                if (name.ToLower() == lower || p.def.label.ToLower() == lower ||
+                    name.ToLower() == stripped || p.def.label.ToLower() == stripped)
                 {
                     animal = p;
                     break;
