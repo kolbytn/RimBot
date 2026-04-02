@@ -21,6 +21,14 @@ dotnet build RimBot.slnx
 - `msbuild` is not on PATH in this shell; always use `dotnet build`
 - .NET 4.7.2 does **not** support TLS 1.3 — use `Tls12` only
 
+## Temporary Files
+
+Store all temporary files (saved logs, test artifacts, etc.) in the `tmp/` directory at the project root. This directory is git-ignored. **Do not use `/tmp` or the system temp directory** — use `tmp/` in the project so files are easy to find and clean up.
+
+## TODO List
+
+After every test run where you read and analyze logs, update the **Known Issues & TODO** section in `README.md`. Add new issues you discover, update existing items with verification status, and note metric changes. Leave fixed/checked items in the list for historical reference — do not remove them.
+
 ## In-Game Log Testing
 
 Use this procedure to verify changes whenever you want to test, or when asked to. Always report back a summarized version of the logs with excerpts where appropriate.

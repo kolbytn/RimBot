@@ -19,3 +19,6 @@ nul
 
 # Claude Code
 .claude/
+
+# Temporary test logs and artifacts
+tmp/
