@@ -58,12 +58,27 @@ namespace RimBot.Tools
                     var names = new List<string>();
                     foreach (var c in colonists)
                         names.Add(c.LabelShort);
+
+                    // Check if the name matches an NPC/visitor on the map
+                    string hint = "";
+                    foreach (var p in map.mapPawns.AllPawnsSpawned)
+                    {
+                        if (p.RaceProps.Humanlike && p.LabelShort.ToLower() == lower)
+                        {
+                            string role = p.Faction == Faction.OfPlayer ? "non-free colonist" :
+                                          p.guest?.IsPrisoner == true ? "prisoner" :
+                                          p.HostFaction != null ? "visitor" : "outsider";
+                            hint = " '" + pawnName + "' is a " + role + ", not one of your colonists — you can only inspect your own colonists.";
+                            break;
+                        }
+                    }
+
                     onComplete(new ToolResult
                     {
                         ToolCallId = call.Id,
                         ToolName = Name,
                         Success = false,
-                        Content = "No colonist named '" + pawnName + "'. Available: " + string.Join(", ", names)
+                        Content = "No colonist named '" + pawnName + "'." + hint + " Your colonists: " + string.Join(", ", names)
                     });
                     return;
                 }

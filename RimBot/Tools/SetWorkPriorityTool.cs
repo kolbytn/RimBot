@@ -66,15 +66,34 @@ namespace RimBot.Tools
                 return;
             }
 
-            // Find the work type def
+            // Find the work type def — normalize: lowercase, strip spaces/underscores
+            // Then try again with gerund suffix stripped from input ("Constructing" → "construct")
             WorkTypeDef workDef = null;
-            string lowerWork = workTypeName.ToLower();
+            string normalized = workTypeName.ToLower().Replace(" ", "").Replace("_", "");
             foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
             {
-                if (wt.defName.ToLower() == lowerWork || wt.labelShort.ToLower() == lowerWork)
+                string normDef = wt.defName.ToLower().Replace(" ", "").Replace("_", "");
+                string normLabel = wt.labelShort.ToLower().Replace(" ", "").Replace("_", "");
+                if (normDef == normalized || normLabel == normalized)
                 {
                     workDef = wt;
                     break;
+                }
+            }
+            // Strip gerund suffix and retry: "constructing" → "construct", "researching" → "research"
+            if (workDef == null && normalized.Length > 4 && normalized.EndsWith("ing"))
+            {
+                string stemmed = normalized.Substring(0, normalized.Length - 3);
+                foreach (var wt in DefDatabase<WorkTypeDef>.AllDefs)
+                {
+                    string normDef = wt.defName.ToLower().Replace(" ", "").Replace("_", "");
+                    string normLabel = wt.labelShort.ToLower().Replace(" ", "").Replace("_", "");
+                    if (normDef == stemmed || normLabel == stemmed ||
+                        normDef.StartsWith(stemmed) || normLabel.StartsWith(stemmed))
+                    {
+                        workDef = wt;
+                        break;
+                    }
                 }
             }
 
@@ -116,5 +135,6 @@ namespace RimBot.Tools
                 Content = "Set " + pawn.LabelShort + "'s " + workDef.labelShort + " to " + statusLabel + "."
             });
         }
+
     }
 }

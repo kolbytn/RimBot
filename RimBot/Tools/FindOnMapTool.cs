@@ -42,16 +42,16 @@ namespace RimBot.Tools
 
             var map = context.Map;
 
-            // Try exact defName first
+            // Stage 1: exact defName
             var def = DefDatabase<ThingDef>.GetNamed(thingName, false);
 
-            // If not found, try case-insensitive search
+            // Stage 2: case-insensitive defName or label
             if (def == null)
             {
                 string lower = thingName.ToLower();
                 foreach (var d in DefDatabase<ThingDef>.AllDefs)
                 {
-                    if (d.defName.ToLower() == lower)
+                    if (d.defName.ToLower() == lower || (d.label != null && d.label.ToLower() == lower))
                     {
                         def = d;
                         break;
@@ -59,13 +59,15 @@ namespace RimBot.Tools
                 }
             }
 
-            // If still not found, try partial match on label
+            // Stage 3: normalized containment — input is substring of defName
+            // Handles "BoltActionRifle" matching "Gun_BoltActionRifle" (prefix stripped)
             if (def == null)
             {
-                string lower = thingName.ToLower();
+                string normalizedInput = thingName.ToLower().Replace("_", "").Replace(" ", "");
                 foreach (var d in DefDatabase<ThingDef>.AllDefs)
                 {
-                    if (d.label != null && d.label.ToLower() == lower)
+                    string normalizedDef = d.defName.ToLower().Replace("_", "").Replace(" ", "");
+                    if (normalizedDef == normalizedInput || normalizedDef.Contains(normalizedInput))
                     {
                         def = d;
                         break;

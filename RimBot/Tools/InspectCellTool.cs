@@ -68,8 +68,20 @@ namespace RimBot.Tools
                 var thing = thingList[i];
                 if (thing is Pawn p)
                 {
-                    string faction = p.Faction != null ? p.Faction.Name : "wild";
-                    pawns.Add(p.LabelShort + " (" + faction + ")");
+                    string role;
+                    if (!p.RaceProps.Humanlike)
+                        role = p.RaceProps.Animal ? "animal" : "creature";
+                    else if (p.Faction == Faction.OfPlayer && p.IsFreeColonist)
+                        role = "colonist";
+                    else if (p.HostileTo(Faction.OfPlayer))
+                        role = "hostile";
+                    else if (p.guest?.IsPrisoner == true)
+                        role = "prisoner";
+                    else if (p.Faction == Faction.OfPlayer)
+                        role = "non-colonist";
+                    else
+                        role = "visitor";
+                    pawns.Add(p.LabelShort + " [" + role + "]");
                 }
                 else if (thing.def.building != null)
                 {
