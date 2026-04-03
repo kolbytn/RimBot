@@ -178,7 +178,7 @@ namespace RimBot
                     "Finish one room before starting another. " +
                     "A room needs 4 walls forming a rectangle, exactly 1 door, then furniture inside. " +
                     "If the status says 'Room is INCOMPLETE', fix gaps before building anything else. " +
-                    "If a door is BLOCKED, cancel the blocking blueprint with architect_orders cancel. " +
+                    "If a door is BLOCKED, remove the obstruction: use cancel for blueprints, deconstruct for built walls. " +
                     "Place workbenches INSIDE rooms with clearance in front — never outdoors. " +
                     "Before placing buildings, use scan_area to check for existing blueprints. " +
                     "Be patient — construction and research take time. Don't change work priorities unless something is wrong.";
@@ -506,20 +506,27 @@ namespace RimBot
                     {
                         if (adjThing == thing) continue;
                         string blocker = null;
-                        if (adjThing.def.passability == Traversability.Impassable && !adjThing.def.IsDoor)
-                            blocker = adjThing.def.label;
-                        else if (adjThing is Blueprint abp)
+                        bool isBlueprint = false;
+                        if (adjThing is Blueprint abp)
                         {
                             var adef = abp.def.entityDefToBuild as ThingDef;
                             if (adef != null && !adef.IsDoor && (adef.passability == Traversability.Impassable || adef.fillPercent > 0.3f))
-                                blocker = adef.label + " blueprint";
+                            { blocker = adef.label + " blueprint"; isBlueprint = true; }
                         }
+                        else if (adjThing.def.passability == Traversability.Impassable && !adjThing.def.IsDoor)
+                            blocker = adjThing.def.label;
+
                         if (blocker != null)
                         {
                             int rx = thing.Position.x - pawn.Position.x;
                             int rz = thing.Position.z - pawn.Position.z;
+                            int bx = adjCell.x - pawn.Position.x;
+                            int bz = adjCell.z - pawn.Position.z;
+                            string fix = isBlueprint
+                                ? "Use architect_orders cancel at (" + bx + "," + bz + ")."
+                                : "Use architect_orders deconstruct at (" + bx + "," + bz + ").";
                             warnings.Add("Door at (" + rx + "," + rz + ") is BLOCKED by " + blocker +
-                                ". Use architect_orders cancel to remove the blocking blueprint.");
+                                " at (" + bx + "," + bz + "). " + fix);
                             break;
                         }
                     }
