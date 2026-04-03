@@ -111,7 +111,9 @@ namespace RimBot
                 }
             }
 
-            // Check for blocked doors — any door/door blueprint with impassable things on either side
+            // Check for blocked doors — only flag if ALL 4 cardinal sides are blocked
+            // or if a non-wall thing blocks a passthrough side. Walls on 2 sides of a door
+            // are normal (they form the wall line the door sits in).
             int blockedDoors = 0;
             foreach (var thing in map.listerThings.AllThings)
             {
@@ -124,37 +126,53 @@ namespace RimBot
 
                 if (!isDoor) continue;
 
-                // Check cells on both sides of the door (the passthrough cells)
-                // Doors are 1x1. Pawns pass through adjacent cardinal cells.
+                int sideBlockedCount = 0;
+                int wallSideCount = 0;
+                bool hasNonWallBlocker = false;
+                string nonWallBlockerName = null;
+                IntVec3 nonWallBlockerCell = IntVec3.Zero;
+
                 foreach (var adj in GenAdj.CardinalDirections)
                 {
                     var adjCell = thing.Position + adj;
-                    if (!adjCell.InBounds(map)) continue;
+                    if (!adjCell.InBounds(map)) { sideBlockedCount++; continue; }
+
+                    bool blocked = false;
+                    bool isWall = false;
                     foreach (var adjThing in adjCell.GetThingList(map))
                     {
                         if (adjThing == thing) continue;
-                        // Check for impassable buildings, blueprints, or frames blocking the door
-                        bool blocking = false;
-                        if (adjThing.def.passability == Traversability.Impassable) blocking = true;
-                        else if (adjThing is Blueprint abp)
+                        string defName = null;
+                        bool impassable = false;
+                        if (adjThing is Blueprint abp3)
                         {
-                            var adef = abp.def.entityDefToBuild as ThingDef;
-                            if (adef != null && adef.passability == Traversability.Impassable) blocking = true;
-                            // Furniture like tables also blocks doors functionally
-                            if (adef != null && adef.building != null && adef.fillPercent > 0.3f) blocking = true;
+                            var ad = abp3.def.entityDefToBuild as ThingDef;
+                            if (ad != null) { defName = ad.defName; impassable = ad.passability == Traversability.Impassable || ad.fillPercent > 0.3f; }
                         }
-                        if (blocking)
+                        else
                         {
-                            blockedDoors++;
-                            warnings.Add("Door at (" + thing.Position.x + "," + thing.Position.z +
-                                ") blocked by " + (adjThing is Blueprint bp2
-                                    ? (bp2.def.entityDefToBuild?.label ?? "blueprint")
-                                    : adjThing.def.label) +
-                                " at (" + adjCell.x + "," + adjCell.z + ")");
-                            break;
+                            defName = adjThing.def.defName;
+                            impassable = adjThing.def.passability == Traversability.Impassable;
+                        }
+                        if (impassable && !adjThing.def.IsDoor)
+                        {
+                            blocked = true;
+                            if (defName == "Wall") isWall = true;
+                            else { hasNonWallBlocker = true; nonWallBlockerName = adjThing is Blueprint bp4 ? (bp4.def.entityDefToBuild?.label ?? "blueprint") : adjThing.def.label; nonWallBlockerCell = adjCell; }
                         }
                     }
-                    if (blockedDoors > 0) break; // only report once per door
+                    if (blocked) sideBlockedCount++;
+                    if (isWall) wallSideCount++;
+                }
+
+                if (sideBlockedCount >= 4 || hasNonWallBlocker)
+                {
+                    blockedDoors++;
+                    if (nonWallBlockerName != null)
+                        warnings.Add("Door at (" + thing.Position.x + "," + thing.Position.z +
+                            ") blocked by " + nonWallBlockerName + " at (" + nonWallBlockerCell.x + "," + nonWallBlockerCell.z + ")");
+                    else
+                        warnings.Add("Door at (" + thing.Position.x + "," + thing.Position.z + ") fully walled in");
                 }
             }
 
@@ -426,7 +444,8 @@ namespace RimBot
                 details.Add("outdoor_workbench_bp=" + outdoorProdBlueprints + " (-" + penalty + ")");
             }
 
-            // Blocked doors (heavy penalty — makes rooms unusable)
+            // Blocked doors — only count if fully walled in or has non-wall blocker
+            // Walls on 2 sides of a door are normal (wall line)
             int blockedDoorCount = 0;
             foreach (var thing in map.listerThings.AllThings)
             {
@@ -435,23 +454,27 @@ namespace RimBot
                 if (!isDoor && thing is Blueprint dbp2 && dbp2.def.entityDefToBuild is ThingDef dd && dd.IsDoor) isDoor = true;
                 if (!isDoor && thing is Frame dfr2 && dfr2.def.entityDefToBuild is ThingDef dd2 && dd2.IsDoor) isDoor = true;
                 if (!isDoor) continue;
+
+                int sides = 0, wallSidesS = 0;
+                bool nonWallBlockerS = false;
                 foreach (var adj in GenAdj.CardinalDirections)
                 {
                     var adjCell = thing.Position + adj;
-                    if (!adjCell.InBounds(map)) continue;
-                    foreach (var adjThing in adjCell.GetThingList(map))
+                    if (!adjCell.InBounds(map)) { sides++; continue; }
+                    bool blk = false, wll = false;
+                    foreach (var at in adjCell.GetThingList(map))
                     {
-                        if (adjThing == thing) continue;
-                        if (adjThing.def.passability == Traversability.Impassable) { blockedDoorCount++; break; }
-                        if (adjThing is Blueprint abp2)
-                        {
-                            var adef2 = abp2.def.entityDefToBuild as ThingDef;
-                            if (adef2 != null && (adef2.passability == Traversability.Impassable || adef2.fillPercent > 0.3f))
-                            { blockedDoorCount++; break; }
-                        }
+                        if (at == thing) continue;
+                        string dn = null; bool imp = false;
+                        if (at is Blueprint abp5) { var ad = abp5.def.entityDefToBuild as ThingDef; if (ad != null) { dn = ad.defName; imp = ad.passability == Traversability.Impassable || ad.fillPercent > 0.3f; } }
+                        else { dn = at.def.defName; imp = at.def.passability == Traversability.Impassable; }
+                        if (imp && !at.def.IsDoor) { blk = true; if (dn == "Wall") wll = true; else nonWallBlockerS = true; }
                     }
-                    if (blockedDoorCount > 0) break;
+                    if (blk) sides++;
+                    if (wll) wallSidesS++;
                 }
+                if (sides >= 4 || nonWallBlockerS)
+                    blockedDoorCount++;
             }
             if (blockedDoorCount > 0)
             {
