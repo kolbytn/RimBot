@@ -64,6 +64,9 @@ namespace RimBot.Tools
             if (def == null)
             {
                 string normalizedInput = thingName.ToLower().Replace("_", "").Replace(" ", "");
+                // Strip parenthetical suffixes like "(blueprint)" or "(frame)"
+                int pIdx = normalizedInput.IndexOf('(');
+                if (pIdx > 0) normalizedInput = normalizedInput.Substring(0, pIdx);
                 foreach (var d in DefDatabase<ThingDef>.AllDefs)
                 {
                     string normalizedDef = d.defName.ToLower().Replace("_", "").Replace(" ", "");
@@ -75,19 +78,65 @@ namespace RimBot.Tools
                 }
             }
 
+            // Stage 4: word overlap — handles reordered words like "MealPackagedSurvival" → "MealSurvivalPack"
             if (def == null)
             {
-                // Suggest similar names
+                var inputWords = new HashSet<string>();
+                foreach (var word in System.Text.RegularExpressions.Regex.Split(thingName, @"(?=[A-Z])|[_\s(]+"))
+                {
+                    if (word.Length >= 3) inputWords.Add(word.ToLower());
+                }
+                if (inputWords.Count >= 2)
+                {
+                    foreach (var d in DefDatabase<ThingDef>.AllDefs)
+                    {
+                        string dl = d.defName.ToLower();
+                        int matches = 0;
+                        foreach (var word in inputWords)
+                        {
+                            if (dl.Contains(word)) matches++;
+                        }
+                        if (matches >= 2)
+                        {
+                            def = d;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (def == null)
+            {
+                // Suggest similar names using substring match and word overlap
                 string lower = thingName.ToLower();
+                // Split input into word fragments (split on uppercase boundaries and common delimiters)
+                var inputWords = new HashSet<string>();
+                foreach (var word in System.Text.RegularExpressions.Regex.Split(thingName, @"(?=[A-Z])|[_\s]+"))
+                {
+                    if (word.Length >= 3) inputWords.Add(word.ToLower());
+                }
+
                 var suggestions = new List<string>();
                 foreach (var d in DefDatabase<ThingDef>.AllDefs)
                 {
-                    if (d.defName.ToLower().Contains(lower) || (d.label != null && d.label.ToLower().Contains(lower)))
+                    string dl = d.defName.ToLower();
+                    string ll = d.label != null ? d.label.ToLower() : "";
+                    // Direct substring match
+                    if (dl.Contains(lower) || ll.Contains(lower))
                     {
                         suggestions.Add(d.defName);
-                        if (suggestions.Count >= 10)
-                            break;
                     }
+                    // Word overlap: if 2+ input words appear in the defName or label
+                    else if (inputWords.Count >= 2)
+                    {
+                        int matches = 0;
+                        foreach (var word in inputWords)
+                        {
+                            if (dl.Contains(word) || ll.Contains(word)) matches++;
+                        }
+                        if (matches >= 2) suggestions.Add(d.defName);
+                    }
+                    if (suggestions.Count >= 10) break;
                 }
 
                 string msg = "No ThingDef found for '" + thingName + "'.";
