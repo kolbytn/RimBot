@@ -245,4 +245,31 @@ namespace RimBot
             MetricsTracker.RecordColonistDeath(__instance.LabelShort, cause);
         }
     }
+
+    /// <summary>Set RimBot difficulty in quicktest game setup, before the game is created.</summary>
+    [HarmonyPatch(typeof(Root_Play), "SetupForQuickTestPlay")]
+    public static class QuickTestDifficultyPatch
+    {
+        public static void Postfix()
+        {
+            try
+            {
+                var rimBotDiff = DefDatabase<DifficultyDef>.GetNamed("RimBot", false);
+                if (rimBotDiff == null) return;
+
+                var initData = Find.GameInitData;
+                if (initData != null)
+                {
+                    // GameInitData stores difficulty via Traverse since field names vary by version
+                    var traverse = HarmonyLib.Traverse.Create(initData);
+                    traverse.Field("difficulty").SetValue(new Difficulty(rimBotDiff));
+                    Log.Message("[RimBot] Quicktest: set difficulty to RimBot.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("[RimBot] Could not set quicktest difficulty: " + ex.Message);
+            }
+        }
+    }
 }

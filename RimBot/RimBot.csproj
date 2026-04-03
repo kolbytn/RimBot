@@ -134,6 +134,7 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup Condition=" '$(CI)' == '' ">
-    <PostBuildEvent>xcopy /Y /E /I "$(TargetDir)*.*" "C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\RimBot\1.6\Assemblies\"</PostBuildEvent>
+    <PostBuildEvent>xcopy /Y /E /I "$(TargetDir)*.*" "C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\RimBot\1.6\Assemblies\"
+xcopy /Y /E /I "$(ProjectDir)..\1.6\Defs\*.*" "C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\RimBot\1.6\Defs\"</PostBuildEvent>
   </PropertyGroup>
 </Project>
