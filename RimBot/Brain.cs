@@ -43,6 +43,25 @@ namespace RimBot
 
         private int lastLetterTick; // Track which letters the bot has already seen
 
+        private static string cachedSystemPrompt;
+        private static string LoadSystemPrompt()
+        {
+            if (cachedSystemPrompt != null) return cachedSystemPrompt;
+            try
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                using (var stream = assembly.GetManifestResourceStream("RimBot.SystemPrompt.txt"))
+                using (var reader = new System.IO.StreamReader(stream))
+                    cachedSystemPrompt = reader.ReadToEnd().Trim();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("[RimBot] Failed to load SystemPrompt.txt: " + ex.Message);
+                cachedSystemPrompt = "You are a RimWorld colonist. Use tools to manage your colony.";
+            }
+            return cachedSystemPrompt;
+        }
+
         public Brain(int pawnId, string label, LLMProviderType provider, string model, string apiKey, string profileId = null)
         {
             PawnId = pawnId;
@@ -164,29 +183,11 @@ namespace RimBot
             {
                 Log.Message("[RimBot] [AGENT] [" + label + "] Starting agent loop...");
 
-                var sysPrompt = "You are the brain of a RimWorld colonist named " + label + ". Play RimWorld. " +
-                    "Each cycle, you receive a screenshot and full status report — no need to request them. " +
-                    "Use tools to ACT, not just observe. " +
-                    "Use architect_* tools to build (structure, production, furniture, power, security, " +
-                    "misc, floors, ship, temperature, joy) — call list_buildables first to see available items. " +
-                    "Use architect_orders for mining, harvesting, hauling, hunting, deconstructing, and more. " +
-                    "Use architect_zone for stockpiles, growing zones, and area management. " +
-                    "Coordinates are relative to you at (0,0). +X=east, +Z=north. " +
-                    "Areas highlighted in red in screenshots belong to other colonists — do not build there. " +
-                    "You can only interact with your own colonists — visitors and NPCs cannot be controlled. " +
-                    "BUILDING RULES: " +
-                    "Finish one room before starting another. " +
-                    "A room needs 4 walls forming a rectangle, exactly 1 door, then furniture inside. " +
-                    "If the status says 'Room is INCOMPLETE', fix gaps before building anything else. " +
-                    "If a door is BLOCKED, remove the obstruction: use cancel for blueprints, deconstruct for built walls. " +
-                    "Place workbenches INSIDE rooms with clearance in front — never outdoors. " +
-                    "Before placing buildings, use scan_area to check for existing blueprints. " +
-                    "Be patient — construction and research take time. Don't change work priorities unless something is wrong.";
+                var sysPrompt = LoadSystemPrompt();
 
                 userParts.Add(ContentPart.FromText(
-                    "Begin. Screenshot attached — you are at center (0,0). " +
-                    "+X=east (right), +Z=north (up). You are currently " + currentActivity + ".\n\n" +
-                    context + "\n\nReview the CRITICAL ISSUES first if any, then act."));
+                    "Screenshot attached — you are at center (0,0). " +
+                    "You are currently " + currentActivity + ".\n\n" + context));
 
                 agentConversation = new List<ChatMessage>
                 {
@@ -213,9 +214,8 @@ namespace RimBot
                 }
 
                 userParts.Add(ContentPart.FromText(
-                    "Continue. " + elapsedSeconds + "s elapsed. Screenshot attached. " +
-                    "You are currently " + currentActivity + ".\n\n" + context +
-                    "\n\nReview the CRITICAL ISSUES first if any, then act."));
+                    elapsedSeconds + "s elapsed. Screenshot attached. " +
+                    "You are currently " + currentActivity + ".\n\n" + context));
 
                 agentConversation.Add(new ChatMessage("user", userParts));
             }
@@ -359,135 +359,88 @@ namespace RimBot
         {
             var sb = new StringBuilder();
 
-            // --- Pawn needs ---
-            sb.Append("Your status: ");
-            if (pawn.needs != null)
-            {
-                var parts = new List<string>();
-                if (pawn.needs.food != null)
-                    parts.Add("food " + (pawn.needs.food.CurLevelPercentage * 100).ToString("F0") + "%");
-                if (pawn.needs.rest != null)
-                    parts.Add("rest " + (pawn.needs.rest.CurLevelPercentage * 100).ToString("F0") + "%");
-                if (pawn.needs.mood != null)
-                    parts.Add("mood " + (pawn.needs.mood.CurLevelPercentage * 100).ToString("F0") + "%");
-                if (pawn.needs.joy != null)
-                    parts.Add("joy " + (pawn.needs.joy.CurLevelPercentage * 100).ToString("F0") + "%");
-                sb.Append(string.Join(", ", parts));
-            }
-            float healthPct = pawn.health.summaryHealth.SummaryHealthPercent;
-            if (healthPct < 1f)
-                sb.Append(", health " + (healthPct * 100).ToString("F0") + "%");
-            sb.AppendLine(".");
+            // === PRIORITY SECTION (most important, top of context) ===
 
-            // --- Equipment ---
-            if (pawn.equipment?.Primary != null)
-                sb.AppendLine("Weapon: " + pawn.equipment.Primary.def.label);
-
-            // --- Key resources ---
-            sb.Append("Colony resources: ");
-            var resParts = new List<string>();
-            AppendResource(resParts, map, ThingDefOf.WoodLog, "wood");
-            AppendResource(resParts, map, ThingDefOf.Steel, "steel");
-            AppendResource(resParts, map, ThingDefOf.ComponentIndustrial, "components");
-            AppendResource(resParts, map, ThingDefOf.Silver, "silver");
-            AppendResource(resParts, map, ThingDefOf.MealSimple, "simple meals");
-            AppendResource(resParts, map, ThingDefOf.MealFine, "fine meals");
-            if (resParts.Count > 0)
-                sb.AppendLine(string.Join(", ", resParts) + ".");
-            else
-                sb.AppendLine("none stockpiled.");
-
-            // --- Research ---
-            var currentResearch = Find.ResearchManager.GetProject();
-            if (currentResearch != null)
-            {
-                sb.AppendLine("Research: " + currentResearch.label +
-                    " (" + (currentResearch.ProgressPercent * 100).ToString("F0") + "% done).");
-            }
-            else
-            {
-                sb.AppendLine("Research: NONE SELECTED — use list_research and set_research to advance technology.");
-            }
-
-            // --- Colonist count ---
-            var colonists = map.mapPawns.FreeColonistsSpawned;
-            if (colonists.Count > 1)
-            {
-                var names = new List<string>();
-                foreach (var c in colonists)
-                {
-                    if (c.thingIDNumber != pawn.thingIDNumber)
-                        names.Add(c.LabelShort);
-                }
-                sb.AppendLine("Fellow colonists: " + string.Join(", ", names) + ".");
-            }
-
-            // --- Threats ---
-            int fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire).Count;
-            if (fires > 0)
-                sb.AppendLine("WARNING: " + fires + " active fires!");
-
-            // --- Critical infrastructure warnings ---
-            var warnings = new List<string>();
-
-            // Food: check for meals and cooking infrastructure
+            // --- Survival status ---
             int meals = map.resourceCounter.GetCount(ThingDefOf.MealSimple)
                       + map.resourceCounter.GetCount(ThingDefOf.MealFine);
+            int survivalMeals = 0;
+            var survivalMealDef = DefDatabase<ThingDef>.GetNamed("MealSurvivalPack", false);
+            if (survivalMealDef != null)
+            {
+                foreach (var t in map.listerThings.ThingsOfDef(survivalMealDef))
+                    survivalMeals += t.stackCount;
+            }
             bool hasStove = HasBuilding(map, "FueledStove") || HasBuilding(map, "ElectricStove");
             bool hasButcher = HasBuilding(map, "TableButcher");
             bool hasGrowingZone = false;
-            foreach (var zone in map.zoneManager.AllZones)
-            {
-                if (zone is Zone_Growing) { hasGrowingZone = true; break; }
-            }
-
-            if (meals == 0 && !hasStove)
-                warnings.Add("NO MEALS and no cook stove — you will starve. Build a fueled stove (production category) and a butcher table urgently.");
-            else if (meals == 0)
-                warnings.Add("NO MEALS — cook food at your stove immediately.");
-            else if (meals < 5)
-                warnings.Add("Low meals (" + meals + ") — prioritize cooking.");
-
-            if (!hasGrowingZone)
-                warnings.Add("No growing zones — create a growing zone with architect_zone to farm food.");
-
-            // Research: check for bench and work priority
-            if (currentResearch != null && currentResearch.ProgressPercent < 0.01f)
-            {
-                bool hasResearchBench = HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench");
-                if (!hasResearchBench)
-                    warnings.Add("Research is set but you have NO research bench — build a simple research bench (production category) so research can progress.");
-                else if (pawn.workSettings != null)
-                {
-                    var researchWork = DefDatabase<WorkTypeDef>.GetNamed("Research", false);
-                    if (researchWork != null && pawn.workSettings.GetPriority(researchWork) == 0)
-                        warnings.Add("Research bench exists but research work is DISABLED. Use set_work_priority to enable research.");
-                    else if (researchWork != null && pawn.workSettings.GetPriority(researchWork) > 3)
-                        warnings.Add("Research work priority is low (" + pawn.workSettings.GetPriority(researchWork) + "). Set it to 1 or 2 to make progress.");
-                }
-            }
-
-            // Incapable colonist warnings
-            if (pawn.WorkTypeIsDisabled(DefDatabase<WorkTypeDef>.GetNamed("Construction", false)))
-                warnings.Add("You are INCAPABLE of construction — blueprints you place must be built by other colonists. Focus on other tasks.");
-            if (pawn.WorkTypeIsDisabled(DefDatabase<WorkTypeDef>.GetNamed("Cooking", false)) && !hasStove)
-                warnings.Add("You are incapable of cooking — another colonist must cook for you.");
-
-            // Shelter: check for bed
-            bool hasBed = HasBuilding(map, "Bed") || HasBuilding(map, "DoubleBed") || HasBuilding(map, "RoyalBed");
-            if (!hasBed)
-                warnings.Add("No bed — build a bed inside a roofed room to avoid mood penalties.");
-
-            // Stockpile
             bool hasStockpile = false;
             foreach (var zone in map.zoneManager.AllZones)
             {
-                if (zone is Zone_Stockpile) { hasStockpile = true; break; }
+                if (zone is Zone_Growing) hasGrowingZone = true;
+                if (zone is Zone_Stockpile) hasStockpile = true;
             }
-            if (!hasStockpile)
-                warnings.Add("No stockpile zone — create one with architect_zone so items can be hauled and organized.");
+            bool hasBed = HasBuilding(map, "Bed") || HasBuilding(map, "DoubleBed") || HasBuilding(map, "RoyalBed");
+            bool hasBedBP = HasBlueprintOrFrame(map, "Bed") || HasBlueprintOrFrame(map, "DoubleBed");
+            bool hasEnclosedRoom = false;
+            foreach (var building in map.listerBuildings.allBuildingsColonist)
+            {
+                if (building == null || !building.Spawned) continue;
+                var room = building.GetRoom();
+                if (room != null && !room.TouchesMapEdge && !room.IsDoorway)
+                { hasEnclosedRoom = true; break; }
+            }
 
-            // Blocked doors — check for impassable things/blueprints adjacent to doors
+            string survivalPriority = null;
+            if (!hasStockpile)
+                survivalPriority = "No stockpile zone. Items cannot be hauled or organized.";
+            else if (meals == 0 && survivalMeals == 0)
+                survivalPriority = "No food. No meals available anywhere on the map.";
+            else if (meals == 0 && survivalMeals > 0)
+                survivalPriority = "No meals in stockpile. " + survivalMeals + " packaged survival meals on the ground need hauling.";
+            else if (!hasEnclosedRoom)
+                survivalPriority = "No enclosed shelter. Need a room (walls + door) with a bed.";
+            else if (!hasBed && !hasBedBP)
+                survivalPriority = "No bed. Need a bed inside the enclosed room.";
+            else if (!hasStove && !HasBlueprintOrFrame(map, "FueledStove") && !HasBlueprintOrFrame(map, "ElectricStove"))
+                survivalPriority = "No long-term food production. Need a cook stove and butcher table.";
+            else if (!hasGrowingZone)
+                survivalPriority = "No growing zone for farming.";
+
+            if (survivalPriority != null)
+                sb.AppendLine("SURVIVAL PRIORITY: " + survivalPriority);
+            else
+                sb.AppendLine("Survival needs are met.");
+
+            // --- Your owned assets ---
+            var tracker = OwnershipTracker.Get(map);
+            if (tracker != null)
+            {
+                var assets = tracker.GetOwnedAssets(pawn.thingIDNumber);
+                if (assets.Count > 0)
+                {
+                    sb.AppendLine("YOUR ASSETS:");
+                    foreach (var asset in assets)
+                    {
+                        int relCX = asset.Center.x - pawn.Position.x;
+                        int relCZ = asset.Center.z - pawn.Position.z;
+                        string location = "near (" + relCX + "," + relCZ + ")";
+
+                        string line = "  " + asset.Name;
+                        if (!string.IsNullOrEmpty(asset.Building))
+                            line += " in " + asset.Building;
+                        if (!string.IsNullOrEmpty(asset.Status))
+                            line += " [" + asset.Status + "]";
+                        line += " " + location;
+                        if (!string.IsNullOrEmpty(asset.Description))
+                            line += ": " + asset.Description;
+                        sb.AppendLine(line);
+                    }
+                }
+            }
+
+            // --- Issues ---
+            var issues = new List<string>();
             foreach (var thing in map.listerThings.AllThings)
             {
                 if (thing.Faction != Faction.OfPlayer) continue;
@@ -496,67 +449,80 @@ namespace RimBot
                 if (!isDoor) continue;
 
                 float dist = (thing.Position - pawn.Position).LengthHorizontalSquared;
-                if (dist > 25 * 25) continue; // only check nearby doors
+                if (dist > 25 * 25) continue;
+
+                // A door normally has walls on 2 sides (the wall line) and open passthrough
+                // on the other 2. Only flag if ALL 4 cardinal sides are blocked (truly sealed)
+                // or if a non-wall thing (furniture/blueprint) is blocking a passthrough side.
+                int blockedSides = 0;
+                int wallSides = 0;
+                string lastBlocker = null;
+                IntVec3 lastBlockerCell = IntVec3.Zero;
+                bool lastIsBP = false;
 
                 foreach (var adj in GenAdj.CardinalDirections)
                 {
                     var adjCell = thing.Position + adj;
-                    if (!adjCell.InBounds(map)) continue;
+                    if (!adjCell.InBounds(map)) { blockedSides++; continue; }
+
+                    bool sideBlocked = false;
+                    bool sideIsWall = false;
                     foreach (var adjThing in adjCell.GetThingList(map))
                     {
                         if (adjThing == thing) continue;
-                        string blocker = null;
-                        bool isBlueprint = false;
-                        if (adjThing is Blueprint abp)
+                        if (adjThing is Blueprint abp2)
                         {
-                            var adef = abp.def.entityDefToBuild as ThingDef;
-                            if (adef != null && !adef.IsDoor && (adef.passability == Traversability.Impassable || adef.fillPercent > 0.3f))
-                            { blocker = adef.label + " blueprint"; isBlueprint = true; }
+                            var adef = abp2.def.entityDefToBuild as ThingDef;
+                            if (adef != null && !adef.IsDoor)
+                            {
+                                if (adef.defName == "Wall") { sideBlocked = true; sideIsWall = true; }
+                                else if (adef.passability == Traversability.Impassable || adef.fillPercent > 0.3f)
+                                { sideBlocked = true; lastBlocker = adef.label + " blueprint"; lastBlockerCell = adjCell; lastIsBP = true; }
+                            }
                         }
                         else if (adjThing.def.passability == Traversability.Impassable && !adjThing.def.IsDoor)
-                            blocker = adjThing.def.label;
-
-                        if (blocker != null)
                         {
-                            int rx = thing.Position.x - pawn.Position.x;
-                            int rz = thing.Position.z - pawn.Position.z;
-                            int bx = adjCell.x - pawn.Position.x;
-                            int bz = adjCell.z - pawn.Position.z;
-                            string fix = isBlueprint
-                                ? "Use architect_orders cancel at (" + bx + "," + bz + ")."
-                                : "Use architect_orders deconstruct at (" + bx + "," + bz + ").";
-                            warnings.Add("Door at (" + rx + "," + rz + ") is BLOCKED by " + blocker +
-                                " at (" + bx + "," + bz + "). " + fix);
-                            break;
+                            sideBlocked = true;
+                            if (adjThing.def.defName == "Wall") sideIsWall = true;
+                            else { lastBlocker = adjThing.def.label; lastBlockerCell = adjCell; lastIsBP = false; }
                         }
+                    }
+                    if (sideBlocked) blockedSides++;
+                    if (sideIsWall) wallSides++;
+                }
+
+                // Only report if door is fully sealed (4 blocked) or has a non-wall blocker
+                if (blockedSides >= 4 || (lastBlocker != null && blockedSides > wallSides))
+                {
+                    int rx = thing.Position.x - pawn.Position.x;
+                    int rz = thing.Position.z - pawn.Position.z;
+                    if (lastBlocker != null)
+                    {
+                        int bx = lastBlockerCell.x - pawn.Position.x;
+                        int bz = lastBlockerCell.z - pawn.Position.z;
+                        string fix = lastIsBP
+                            ? "Use architect_orders cancel at (" + bx + "," + bz + ")."
+                            : "Use architect_orders deconstruct at (" + bx + "," + bz + ").";
+                        issues.Add("Door at (" + rx + "," + rz + ") blocked by " + lastBlocker +
+                            " at (" + bx + "," + bz + "). " + fix);
+                    }
+                    else
+                    {
+                        issues.Add("Door at (" + rx + "," + rz + ") is fully walled in with no passthrough.");
                     }
                 }
             }
-
-            if (warnings.Count > 0)
+            var constructionDef = DefDatabase<WorkTypeDef>.GetNamed("Construction", false);
+            if (constructionDef != null && pawn.WorkTypeIsDisabled(constructionDef))
+                issues.Add("You are incapable of construction — other colonists must build your blueprints.");
+            if (issues.Count > 0)
             {
-                sb.AppendLine("CRITICAL ISSUES:");
-                foreach (var w in warnings)
+                sb.AppendLine("ISSUES:");
+                foreach (var w in issues)
                     sb.AppendLine("  - " + w);
             }
 
-            // --- Existing infrastructure (prevents re-placing after conversation trim) ---
-            // Check both completed buildings AND blueprints/frames
-            var infra = new List<string>();
-            if (hasStove || HasBlueprintOrFrame(map, "FueledStove") || HasBlueprintOrFrame(map, "ElectricStove"))
-                infra.Add("cook stove");
-            if (hasButcher || HasBlueprintOrFrame(map, "TableButcher"))
-                infra.Add("butcher table");
-            if (HasBuilding(map, "SimpleResearchBench") || HasBuilding(map, "HiTechResearchBench") ||
-                HasBlueprintOrFrame(map, "SimpleResearchBench") || HasBlueprintOrFrame(map, "HiTechResearchBench"))
-                infra.Add("research bench");
-            if (hasStockpile) infra.Add("stockpile");
-            if (hasGrowingZone) infra.Add("growing zone");
-            if (infra.Count > 0)
-                sb.AppendLine("You already have (built or blueprinted): " + string.Join(", ", infra) + ". Do not rebuild these.");
-
-            // --- Nearby structures (helps bot complete rooms across cycles) ---
-            AppendNearbyStructures(sb, pawn, map);
+            // === CURRENT WORK STATE ===
 
             // --- Current job + queue ---
             if (pawn.jobs != null)
@@ -578,7 +544,7 @@ namespace RimBot
                 }
             }
 
-            // --- Current work priorities (set by you) ---
+            // --- Work priorities ---
             if (pawn.workSettings != null)
             {
                 var highWork = new List<string>();
@@ -588,13 +554,63 @@ namespace RimBot
                         highWork.Add(wt.labelShort);
                 }
                 if (highWork.Count > 0)
-                    sb.AppendLine("Work priorities you set to HIGH: " + string.Join(", ", highWork) +
-                        ". All other work is active at low priority.");
+                    sb.AppendLine("HIGH priority work: " + string.Join(", ", highWork) + ".");
                 else
-                    sb.AppendLine("All work is at low (default) priority. No high-priority work set by you.");
+                    sb.AppendLine("All work at default priority.");
             }
 
-            // --- Active alerts from the game ---
+            // === BACKGROUND DATA ===
+
+            // --- Pawn needs ---
+            sb.Append("Needs: ");
+            if (pawn.needs != null)
+            {
+                var parts = new List<string>();
+                if (pawn.needs.food != null)
+                    parts.Add("food " + (pawn.needs.food.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.rest != null)
+                    parts.Add("rest " + (pawn.needs.rest.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.mood != null)
+                    parts.Add("mood " + (pawn.needs.mood.CurLevelPercentage * 100).ToString("F0") + "%");
+                if (pawn.needs.joy != null)
+                    parts.Add("joy " + (pawn.needs.joy.CurLevelPercentage * 100).ToString("F0") + "%");
+                sb.Append(string.Join(", ", parts));
+            }
+            float healthPct = pawn.health.summaryHealth.SummaryHealthPercent;
+            if (healthPct < 1f)
+                sb.Append(", health " + (healthPct * 100).ToString("F0") + "%");
+            sb.AppendLine(".");
+
+            // --- Resources ---
+            var resParts = new List<string>();
+            AppendResource(resParts, map, ThingDefOf.WoodLog, "wood");
+            AppendResource(resParts, map, ThingDefOf.Steel, "steel");
+            AppendResource(resParts, map, ThingDefOf.ComponentIndustrial, "components");
+            AppendResource(resParts, map, ThingDefOf.Silver, "silver");
+            AppendResource(resParts, map, ThingDefOf.MealSimple, "simple meals");
+            AppendResource(resParts, map, ThingDefOf.MealFine, "fine meals");
+            sb.AppendLine("Resources: " + (resParts.Count > 0 ? string.Join(", ", resParts) : "none stockpiled") + ".");
+
+            // --- Fellow colonists ---
+            var colonists = map.mapPawns.FreeColonistsSpawned;
+            if (colonists.Count > 1)
+            {
+                var names = new List<string>();
+                foreach (var c in colonists)
+                {
+                    if (c.thingIDNumber != pawn.thingIDNumber)
+                        names.Add(c.LabelShort);
+                }
+                sb.AppendLine("Fellow colonists: " + string.Join(", ", names) + ".");
+            }
+
+            // --- Research ---
+            var currentResearch = Find.ResearchManager.GetProject();
+            if (currentResearch != null)
+                sb.AppendLine("Research: " + currentResearch.label +
+                    " (" + (currentResearch.ProgressPercent * 100).ToString("F0") + "%).");
+
+            // --- Alerts and events ---
             try
             {
                 var uiRoot = Find.UIRoot as UIRoot_Play;
@@ -614,14 +630,13 @@ namespace RimBot
                                     alertTexts.Add(label2);
                             }
                             if (alertTexts.Count > 0)
-                                sb.AppendLine("GAME ALERTS: " + string.Join("; ", alertTexts) + ".");
+                                sb.AppendLine("Alerts: " + string.Join("; ", alertTexts) + ".");
                         }
                     }
                 }
             }
             catch { }
 
-            // --- New letters since last cycle ---
             try
             {
                 var letterStack = Find.LetterStack;
@@ -640,15 +655,11 @@ namespace RimBot
                         }
                         lastLetterTick = currentTick;
                         if (newLetters.Count > 0)
-                            sb.AppendLine("NEW EVENTS: " + string.Join("; ", newLetters) + ".");
+                            sb.AppendLine("New events: " + string.Join("; ", newLetters) + ".");
                     }
                 }
             }
             catch { }
-
-            // --- Day ---
-            float daysPassed = Find.TickManager.TicksGame / 60000f;
-            sb.AppendLine("Colony day: " + daysPassed.ToString("F1") + ".");
 
             return sb.ToString().TrimEnd();
         }
@@ -682,116 +693,6 @@ namespace RimBot
             return false;
         }
 
-        /// <summary>
-        /// Scans nearby walls, doors, and blueprints to help the bot understand where its
-        /// existing structures are relative to its current position. Reports bounding box
-        /// and gap information so the bot can complete rooms across cycles.
-        /// </summary>
-        private static void AppendNearbyStructures(StringBuilder sb, Pawn pawn, Map map)
-        {
-            var pawnPos = pawn.Position;
-            int scanRadius = 20;
-
-            // Collect wall/door positions (completed + blueprints + frames)
-            var wallPositions = new List<IntVec3>();
-            var doorPositions = new List<IntVec3>();
-
-            for (int dx = -scanRadius; dx <= scanRadius; dx++)
-            {
-                for (int dz = -scanRadius; dz <= scanRadius; dz++)
-                {
-                    var cell = new IntVec3(pawnPos.x + dx, 0, pawnPos.z + dz);
-                    if (!cell.InBounds(map)) continue;
-
-                    foreach (var thing in cell.GetThingList(map))
-                    {
-                        if (thing.Faction != Faction.OfPlayer) continue;
-
-                        string defName = null;
-                        if (thing is Blueprint bp)
-                            defName = bp.def.entityDefToBuild?.defName;
-                        else if (thing is Frame fr)
-                            defName = fr.def.entityDefToBuild?.defName;
-                        else if (thing.def.building != null)
-                            defName = thing.def.defName;
-
-                        if (defName == null) continue;
-
-                        if (defName == "Wall")
-                            wallPositions.Add(thing.Position);
-                        else if (defName == "Door")
-                            doorPositions.Add(thing.Position);
-                    }
-                }
-            }
-
-            if (wallPositions.Count == 0) return;
-
-            // Compute bounding box in relative coordinates
-            int minX = int.MaxValue, maxX = int.MinValue;
-            int minZ = int.MaxValue, maxZ = int.MinValue;
-            foreach (var pos in wallPositions)
-            {
-                int rx = pos.x - pawnPos.x;
-                int rz = pos.z - pawnPos.z;
-                if (rx < minX) minX = rx;
-                if (rx > maxX) maxX = rx;
-                if (rz < minZ) minZ = rz;
-                if (rz > maxZ) maxZ = rz;
-            }
-            foreach (var pos in doorPositions)
-            {
-                int rx = pos.x - pawnPos.x;
-                int rz = pos.z - pawnPos.z;
-                if (rx < minX) minX = rx;
-                if (rx > maxX) maxX = rx;
-                if (rz < minZ) minZ = rz;
-                if (rz > maxZ) maxZ = rz;
-            }
-
-            sb.AppendLine("Nearby structures: " + wallPositions.Count + " walls, " +
-                doorPositions.Count + " doors in range. Bounding box: (" +
-                minX + "," + minZ + ") to (" + maxX + "," + maxZ + ") relative to you.");
-
-            // Check for gaps in the bounding box perimeter — these are where the room is incomplete
-            var wallSet = new HashSet<long>();
-            foreach (var pos in wallPositions)
-                wallSet.Add((long)pos.x << 32 | (long)(uint)pos.z);
-            foreach (var pos in doorPositions)
-                wallSet.Add((long)pos.x << 32 | (long)(uint)pos.z);
-
-            // Check all 4 edges of the bounding box for gaps
-            int absMinX = pawnPos.x + minX, absMaxX = pawnPos.x + maxX;
-            int absMinZ = pawnPos.z + minZ, absMaxZ = pawnPos.z + maxZ;
-            var gapPositions = new List<string>();
-
-            for (int x = absMinX; x <= absMaxX; x++)
-            {
-                if (!wallSet.Contains((long)x << 32 | (long)(uint)absMinZ))
-                    gapPositions.Add("(" + (x - pawnPos.x) + "," + (absMinZ - pawnPos.z) + ")");
-                if (!wallSet.Contains((long)x << 32 | (long)(uint)absMaxZ))
-                    gapPositions.Add("(" + (x - pawnPos.x) + "," + (absMaxZ - pawnPos.z) + ")");
-            }
-            for (int z = absMinZ + 1; z < absMaxZ; z++)
-            {
-                if (!wallSet.Contains((long)absMinX << 32 | (long)(uint)z))
-                    gapPositions.Add("(" + (absMinX - pawnPos.x) + "," + (z - pawnPos.z) + ")");
-                if (!wallSet.Contains((long)absMaxX << 32 | (long)(uint)z))
-                    gapPositions.Add("(" + (absMaxX - pawnPos.x) + "," + (z - pawnPos.z) + ")");
-            }
-
-            if (gapPositions.Count > 0 && gapPositions.Count <= 15)
-            {
-                sb.AppendLine("Room is INCOMPLETE: " + gapPositions.Count +
-                    " gaps in perimeter. Place walls at: " + string.Join(", ", gapPositions));
-            }
-            else if (gapPositions.Count > 15)
-            {
-                sb.AppendLine("Room is INCOMPLETE: " + gapPositions.Count + " gaps — too many walls missing. Consider starting a smaller room.");
-            }
-            else if (gapPositions.Count == 0 && wallPositions.Count >= 8)
-                sb.AppendLine("Room perimeter is complete.");
-        }
 
         private void RecordSingleTurn(AgentTurn turn, int iterIndex, string systemPrompt)
         {

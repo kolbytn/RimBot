@@ -128,6 +128,9 @@
     <Compile Include="Tools\SetResearchTool.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="SystemPrompt.txt" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup Condition=" '$(CI)' == '' ">
     <PostBuildEvent>xcopy /Y /E /I "$(TargetDir)*.*" "C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\RimBot\1.6\Assemblies\"</PostBuildEvent>
