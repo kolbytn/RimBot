@@ -27,6 +27,7 @@ namespace RimBot
         private const int MaxHistoryEntries = 50;
         private List<ChatMessage> agentConversation;
         private readonly List<int> cycleStartIndices = new List<int>(); // message index where each cycle's user message starts
+        private string conversationSummary; // accumulated summary of trimmed cycles
         private const int CycleTrimThreshold = 10;
         private const int CycleTrimTarget = 5;
         private float lastRunStartedAt = float.MinValue;
@@ -77,6 +78,7 @@ namespace RimBot
         {
             agentConversation = null;
             cycleStartIndices.Clear();
+            conversationSummary = null;
             history.Clear();
         }
 
@@ -253,6 +255,9 @@ namespace RimBot
             {
                 try
                 {
+                    // Summarize any dropped cycles before starting the agent loop
+                    await RunPendingSummarization(llmModel, model, apiKey, maxTokens);
+
                     var result = await AgentRunner.RunAgent(
                         this, messages, tools, llmModel, model, apiKey, maxTokens, thinkingLevel, toolContext, onTurnComplete);
 
@@ -322,27 +327,56 @@ namespace RimBot
                    lower.Contains("resource_exhausted") || lower.Contains("quota");
         }
 
+        /// <summary>
+        /// Holds data needed for async summarization of dropped cycles.
+        /// Prepared on main thread, consumed on background thread.
+        /// </summary>
+        private class PendingTrim
+        {
+            public List<ChatMessage> DroppedMessages;
+            public List<int> DroppedCycleIndices;
+            public int CyclesToDrop;
+        }
+
+        private PendingTrim pendingTrim;
+
+        /// <summary>
+        /// Check if trimming is needed and prepare data. Called on main thread.
+        /// The actual LLM summarization happens async before the agent loop.
+        /// </summary>
         private void TrimConversation()
         {
             if (agentConversation == null || cycleStartIndices.Count < CycleTrimThreshold)
                 return;
 
-            // Keep system prompt + last CycleTrimTarget cycles
             int cyclesToDrop = cycleStartIndices.Count - CycleTrimTarget;
             if (cyclesToDrop <= 0) return;
 
-            // The first message to keep is the start of the cycle we're keeping from
             int keepFromIdx = cycleStartIndices[cyclesToDrop];
 
-            // Build trimmed conversation: system prompt + kept cycles
+            // Snapshot the messages and indices we're about to drop for async summarization
+            var droppedMessages = new List<ChatMessage>();
+            for (int i = 0; i < keepFromIdx; i++)
+                droppedMessages.Add(agentConversation[i]);
+            var droppedIndices = new List<int>();
+            for (int i = 0; i < cyclesToDrop; i++)
+                droppedIndices.Add(cycleStartIndices[i]);
+
+            pendingTrim = new PendingTrim
+            {
+                DroppedMessages = droppedMessages,
+                DroppedCycleIndices = droppedIndices,
+                CyclesToDrop = cyclesToDrop
+            };
+
+            // Trim the conversation immediately (don't wait for summarization)
             var trimmed = new List<ChatMessage>();
             trimmed.Add(agentConversation[0]); // system prompt
 
             for (int i = keepFromIdx; i < agentConversation.Count; i++)
                 trimmed.Add(agentConversation[i]);
 
-            // Update cycle indices — shift them to account for removed messages
-            int offset = keepFromIdx - 1; // -1 because we kept system prompt at index 0
+            int offset = keepFromIdx - 1;
             var newIndices = new List<int>();
             for (int i = cyclesToDrop; i < cycleStartIndices.Count; i++)
                 newIndices.Add(cycleStartIndices[i] - offset);
@@ -358,12 +392,51 @@ namespace RimBot
         }
 
         /// <summary>
+        /// Run the pending summarization asynchronously. Called on background thread
+        /// before the agent loop starts.
+        /// </summary>
+        private async Task RunPendingSummarization(ILanguageModel llm, string model, string apiKey, int maxTokens)
+        {
+            if (pendingTrim == null) return;
+
+            var trim = pendingTrim;
+            pendingTrim = null;
+
+            try
+            {
+                string newSummary = await ConversationSummarizer.SummarizeCyclesAsync(
+                    trim.DroppedMessages, trim.DroppedCycleIndices,
+                    0, trim.CyclesToDrop - 1,
+                    llm, model, apiKey, maxTokens);
+
+                if (!string.IsNullOrEmpty(newSummary))
+                {
+                    conversationSummary = ConversationSummarizer.MergeSummaries(conversationSummary, newSummary);
+                    Log.Message("[RimBot] [AGENT] [" + PawnLabel + "] Summarized " +
+                        trim.CyclesToDrop + " dropped cycles (" + newSummary.Length + " chars)");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warning("[RimBot] [AGENT] [" + PawnLabel + "] Summarization failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Builds a context string with pawn status, nearby objects, resources, and research.
         /// Called on main thread before launching the agent loop.
         /// </summary>
         private string BuildContext(Pawn pawn, Map map)
         {
             var sb = new StringBuilder();
+
+            // === HISTORY SUMMARY (compressed record of earlier cycles) ===
+            if (!string.IsNullOrEmpty(conversationSummary))
+            {
+                sb.AppendLine("PREVIOUS WORK:");
+                sb.AppendLine(conversationSummary);
+                sb.AppendLine("");
+            }
 
             // === PRIORITY SECTION (most important, top of context) ===
 

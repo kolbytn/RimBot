@@ -101,6 +101,7 @@
     <Compile Include="OwnershipPatches.cs" />
     <Compile Include="ScreenshotCapture.cs" />
     <Compile Include="AgentRunner.cs" />
+    <Compile Include="ConversationSummarizer.cs" />
     <Compile Include="MetricsTracker.cs" />
     <Compile Include="SpatialEvaluator.cs" />
     <Compile Include="Tools\ToolTypes.cs" />
