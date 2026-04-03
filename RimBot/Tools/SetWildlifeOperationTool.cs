@@ -45,11 +45,16 @@ namespace RimBot.Tools
             var map = context.Map;
             var dm = map.designationManager;
 
-            // Find wild animal by exact name, species label, or normalized species match
+            // Find wild animal by name or species label
+            // Normalize: strip trailing IDs ("Gazelle 58284"), parenthetical species ("yak (yak)"),
+            // and try both individual name and species def label
             Pawn animal = null;
-            string lower = animalName.ToLower();
-            // Strip trailing numbers/IDs that the LLM sometimes appends (e.g. "Gazelle 58284")
-            string stripped = System.Text.RegularExpressions.Regex.Replace(lower, @"\s*\d+$", "");
+            string lower = animalName.ToLower().Trim();
+            // Strip parenthetical suffix: "yak (yak)" → "yak"
+            int parenIdx = lower.IndexOf('(');
+            if (parenIdx > 0) lower = lower.Substring(0, parenIdx).Trim();
+            // Strip trailing numeric IDs: "Gazelle 58284" → "gazelle"
+            lower = System.Text.RegularExpressions.Regex.Replace(lower, @"\s+\d+$", "");
             var wildNames = new List<string>();
 
             foreach (var p in map.mapPawns.AllPawnsSpawned)
@@ -60,8 +65,7 @@ namespace RimBot.Tools
                 string name = p.Name != null ? p.Name.ToStringShort : p.LabelShort;
                 wildNames.Add(name + " (" + p.def.label + ")");
 
-                if (name.ToLower() == lower || p.def.label.ToLower() == lower ||
-                    name.ToLower() == stripped || p.def.label.ToLower() == stripped)
+                if (name.ToLower() == lower || p.def.label.ToLower() == lower)
                 {
                     animal = p;
                     break;
