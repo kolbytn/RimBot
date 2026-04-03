@@ -26,8 +26,9 @@ namespace RimBot
         private readonly List<HistoryEntry> history = new List<HistoryEntry>();
         private const int MaxHistoryEntries = 50;
         private List<ChatMessage> agentConversation;
-        private const int ConversationTrimThreshold = 40;
-        private const int ConversationTrimTarget = 24;
+        private readonly List<int> cycleStartIndices = new List<int>(); // message index where each cycle's user message starts
+        private const int CycleTrimThreshold = 10;
+        private const int CycleTrimTarget = 5;
         private float lastRunStartedAt = float.MinValue;
         private float pauseUntil;
 
@@ -75,6 +76,7 @@ namespace RimBot
         public void ClearConversation()
         {
             agentConversation = null;
+            cycleStartIndices.Clear();
             history.Clear();
         }
 
@@ -194,14 +196,17 @@ namespace RimBot
                     new ChatMessage("system", sysPrompt),
                     new ChatMessage("user", userParts)
                 };
+                cycleStartIndices.Clear();
+                cycleStartIndices.Add(1); // user message at index 1 (after system)
             }
             else
             {
                 int elapsedSeconds = (int)elapsed;
                 Log.Message("[RimBot] [AGENT] [" + label + "] Continuing conversation (" +
-                    agentConversation.Count + " messages, " + elapsedSeconds + "s elapsed)...");
+                    agentConversation.Count + " messages, " + cycleStartIndices.Count + " cycles, " +
+                    elapsedSeconds + "s elapsed)...");
 
-                // Trim conversation if too long — keep system + first user + last N messages
+                // Trim by cycle count
                 TrimConversation();
 
                 // After max iterations the conversation ends with user(tool_results).
@@ -212,6 +217,9 @@ namespace RimBot
                     agentConversation.Add(new ChatMessage("assistant",
                         "I've used all my actions for this cycle. I'll reassess the situation next cycle."));
                 }
+
+                // Record this cycle's start index
+                cycleStartIndices.Add(agentConversation.Count);
 
                 userParts.Add(ContentPart.FromText(
                     elapsedSeconds + "s elapsed. Screenshot attached. " +
@@ -316,39 +324,37 @@ namespace RimBot
 
         private void TrimConversation()
         {
-            if (agentConversation == null || agentConversation.Count <= ConversationTrimThreshold)
+            if (agentConversation == null || cycleStartIndices.Count < CycleTrimThreshold)
                 return;
 
-            // Trim down to target to maximize cache hits between trims
-            int keepFromEnd = ConversationTrimTarget - 2;
-            if (keepFromEnd < 2) keepFromEnd = 2;
+            // Keep system prompt + last CycleTrimTarget cycles
+            int cyclesToDrop = cycleStartIndices.Count - CycleTrimTarget;
+            if (cyclesToDrop <= 0) return;
 
-            int startIdx = agentConversation.Count - keepFromEnd;
-            if (startIdx < 2) startIdx = 2;
+            // The first message to keep is the start of the cycle we're keeping from
+            int keepFromIdx = cycleStartIndices[cyclesToDrop];
 
-            // Find a clean boundary: must be a plain assistant message (no tool_use parts)
-            // to ensure proper role alternation after system(0) + first user(1).
-            // Skipping user messages here prevents consecutive user messages in the trimmed result.
-            while (startIdx < agentConversation.Count - 2)
-            {
-                var msg = agentConversation[startIdx];
-                if (msg.HasToolResult || msg.HasToolUse || msg.Role != "assistant")
-                {
-                    startIdx++;
-                    continue;
-                }
-                break;
-            }
-
+            // Build trimmed conversation: system prompt + kept cycles
             var trimmed = new List<ChatMessage>();
-            trimmed.Add(agentConversation[0]); // system
-            trimmed.Add(agentConversation[1]); // first user
+            trimmed.Add(agentConversation[0]); // system prompt
 
-            for (int i = startIdx; i < agentConversation.Count; i++)
+            for (int i = keepFromIdx; i < agentConversation.Count; i++)
                 trimmed.Add(agentConversation[i]);
 
+            // Update cycle indices — shift them to account for removed messages
+            int offset = keepFromIdx - 1; // -1 because we kept system prompt at index 0
+            var newIndices = new List<int>();
+            for (int i = cyclesToDrop; i < cycleStartIndices.Count; i++)
+                newIndices.Add(cycleStartIndices[i] - offset);
+
+            int oldCount = agentConversation.Count;
             agentConversation = trimmed;
-            Log.Message("[RimBot] [AGENT] [" + PawnLabel + "] Trimmed conversation to " + agentConversation.Count + " messages");
+            cycleStartIndices.Clear();
+            cycleStartIndices.AddRange(newIndices);
+
+            Log.Message("[RimBot] [AGENT] [" + PawnLabel + "] Trimmed conversation: " +
+                oldCount + " → " + agentConversation.Count + " messages, " +
+                "dropped " + cyclesToDrop + " cycles, keeping " + cycleStartIndices.Count);
         }
 
         /// <summary>
