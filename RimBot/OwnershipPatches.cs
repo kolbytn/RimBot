@@ -19,7 +19,6 @@ namespace RimBot
         {
             capturedMap = __instance.Map;
             capturedPos = __instance.Position;
-            // Capture owner now — ThingDestroyPatch will remove it from the dict during this method
             capturedOwner = OwnershipTracker.Get(capturedMap)?.GetThingOwner(__instance.thingIDNumber) ?? -1;
         }
 
@@ -32,14 +31,13 @@ namespace RimBot
             if (tracker == null)
                 return;
 
-            // Use createdThing if Harmony captured the out parameter
             if (createdThing != null)
             {
                 tracker.SetThingOwner(createdThing.thingIDNumber, capturedOwner);
                 return;
             }
 
-            // Fallback: search by position for a Frame (out parameter capture can be unreliable)
+            // Fallback: search by position for a Frame
             var things = capturedPos.GetThingList(capturedMap);
             for (int i = 0; i < things.Count; i++)
             {
@@ -49,6 +47,9 @@ namespace RimBot
                     return;
                 }
             }
+
+            Log.Warning("[RimBot] Ownership transfer failed: blueprint → frame at (" +
+                capturedPos.x + "," + capturedPos.z + "), owner=" + capturedOwner);
         }
     }
 
@@ -72,17 +73,25 @@ namespace RimBot
 
         public static void Postfix(Pawn worker)
         {
-            if (capturedMap == null || capturedOwner < 0)
+            if (capturedMap == null)
                 return;
+
+            if (capturedOwner < 0)
+            {
+                // Frame had no owner — log for debugging
+                string defName = capturedBuildDef?.defName ?? "unknown";
+                Log.Warning("[RimBot] Unowned frame completed: " + defName + " at (" +
+                    capturedPos.x + "," + capturedPos.z + ") by " +
+                    (worker?.LabelShort ?? "unknown"));
+                return;
+            }
 
             var tracker = OwnershipTracker.Get(capturedMap);
             if (tracker == null)
                 return;
 
-            // Find the newly built thing at the captured position
             var things = capturedPos.GetThingList(capturedMap);
 
-            // Primary: match by the def that was being built
             if (capturedBuildDef != null)
             {
                 for (int i = 0; i < things.Count; i++)
@@ -96,7 +105,6 @@ namespace RimBot
                 }
             }
 
-            // Fallback: any new building at this position
             for (int i = 0; i < things.Count; i++)
             {
                 var t = things[i];
@@ -107,6 +115,9 @@ namespace RimBot
                     return;
                 }
             }
+
+            Log.Warning("[RimBot] Ownership transfer failed: frame → building at (" +
+                capturedPos.x + "," + capturedPos.z + "), owner=" + capturedOwner);
         }
 
         private static void AutoAssignBed(Thing t)
@@ -118,6 +129,49 @@ namespace RimBot
                 if (ownerPawn != null)
                     ownerPawn.ownership.ClaimBedIfNonMedical(bed);
             }
+        }
+    }
+
+    // --- Botched construction: Frame reverts to Blueprint ---
+
+    [HarmonyPatch(typeof(Frame), "FailConstruction")]
+    public static class FrameFailConstructionPatch
+    {
+        private static Map capturedMap;
+        private static IntVec3 capturedPos;
+        private static int capturedOwner;
+
+        public static void Prefix(Frame __instance)
+        {
+            capturedMap = __instance.Map;
+            capturedPos = __instance.Position;
+            capturedOwner = OwnershipTracker.Get(capturedMap)?.GetThingOwner(__instance.thingIDNumber) ?? -1;
+        }
+
+        public static void Postfix()
+        {
+            if (capturedMap == null || capturedOwner < 0)
+                return;
+
+            var tracker = OwnershipTracker.Get(capturedMap);
+            if (tracker == null)
+                return;
+
+            // Find the new blueprint at the same position
+            var things = capturedPos.GetThingList(capturedMap);
+            for (int i = 0; i < things.Count; i++)
+            {
+                if (things[i] is Blueprint blueprint)
+                {
+                    tracker.SetThingOwner(blueprint.thingIDNumber, capturedOwner);
+                    Log.Message("[RimBot] Botched construction at (" + capturedPos.x + "," +
+                        capturedPos.z + "): ownership preserved on new blueprint (owner=" + capturedOwner + ")");
+                    return;
+                }
+            }
+
+            Log.Warning("[RimBot] Botched construction at (" + capturedPos.x + "," +
+                capturedPos.z + "): could not find new blueprint to transfer ownership (owner=" + capturedOwner + ")");
         }
     }
 
