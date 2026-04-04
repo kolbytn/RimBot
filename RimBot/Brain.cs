@@ -28,8 +28,8 @@ namespace RimBot
         private List<ChatMessage> agentConversation;
         private readonly List<int> cycleStartIndices = new List<int>(); // message index where each cycle's user message starts
         private string conversationSummary; // accumulated summary of trimmed cycles
-        private const int CycleTrimThreshold = 10;
-        private const int CycleTrimTarget = 5;
+        private const int CycleTrimThreshold = 5;
+        private const int CycleTrimTarget = 3;
         private float lastRunStartedAt = float.MinValue;
         private float pauseUntil;
 

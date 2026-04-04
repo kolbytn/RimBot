@@ -30,7 +30,7 @@ namespace RimBot
 
     public static class AgentRunner
     {
-        private const int MaxIterations = 20;
+        private const int MaxIterations = 15;
 
         public static async Task<AgentResult> RunAgent(
             Brain brain, List<ChatMessage> messages, List<ToolDefinition> tools,
