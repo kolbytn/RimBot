@@ -343,6 +343,10 @@ namespace RimBot
                 brains[pawnId] = brain;
                 Log.Message("[RimBot] Created brain for " + pawn.LabelShort
                     + " (" + profile.Provider + ", " + profile.Model + ")");
+
+                // Auto-enable ownership overlay for all bots
+                if (!OwnershipTracker.IsHighlighted(pawnId))
+                    OwnershipTracker.ToggleHighlight(pawnId);
             }
         }
 
