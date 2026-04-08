@@ -607,6 +607,96 @@ namespace RimBot
                     }
                 }
             }
+            // --- Blocked workbenches owned by this pawn ---
+            if (tracker != null)
+            {
+                foreach (var building in map.listerBuildings.allBuildingsColonist)
+                {
+                    if (building == null || !building.Spawned || !building.def.hasInteractionCell) continue;
+                    if (tracker.GetThingOwner(building.thingIDNumber) != pawn.thingIDNumber) continue;
+
+                    var iCell = building.InteractionCell;
+                    bool blocked = false;
+                    string blockerName = null;
+                    if (!iCell.InBounds(map))
+                    {
+                        blocked = true;
+                    }
+                    else
+                    {
+                        foreach (var t in iCell.GetThingList(map))
+                        {
+                            if (t == building) continue;
+                            if (t.def.passability == Traversability.Impassable)
+                            {
+                                blocked = true;
+                                blockerName = t.def.label;
+                                break;
+                            }
+                        }
+                    }
+                    if (blocked)
+                    {
+                        int rx = building.Position.x - pawn.Position.x;
+                        int rz = building.Position.z - pawn.Position.z;
+                        string msg = building.def.label + " at (" + rx + "," + rz + ") has its interaction spot blocked";
+                        if (blockerName != null) msg += " by " + blockerName;
+                        msg += ". It cannot be used until the obstruction is removed. Consider deconstructing the blocker or the workbench and rebuilding with correct clearance.";
+                        issues.Add(msg);
+                    }
+                }
+            }
+
+            // --- Inaccessible room detection (door with no walkable exit) ---
+            if (tracker != null)
+            {
+                foreach (var thing in map.listerThings.AllThings)
+                {
+                    if (thing.Faction != Faction.OfPlayer || !thing.def.IsDoor || !thing.Spawned) continue;
+                    // Only check doors near this pawn's assets
+                    if (tracker.GetThingOwner(thing.thingIDNumber) != pawn.thingIDNumber) continue;
+
+                    // A door should have at least one walkable cardinal neighbor that leads
+                    // to a different room or outdoors. If all non-wall sides are also blocked,
+                    // the room behind this door is inaccessible.
+                    bool hasExteriorExit = false;
+                    bool hasInteriorSide = false;
+                    foreach (var adj in GenAdj.CardinalDirections)
+                    {
+                        var adjCell = thing.Position + adj;
+                        if (!adjCell.InBounds(map)) continue;
+
+                        bool cellBlocked = false;
+                        foreach (var adjThing in adjCell.GetThingList(map))
+                        {
+                            if (adjThing == thing) continue;
+                            if (adjThing.def.passability == Traversability.Impassable && !adjThing.def.IsDoor)
+                            {
+                                cellBlocked = true;
+                                break;
+                            }
+                        }
+
+                        if (!cellBlocked)
+                        {
+                            var adjRoom = adjCell.GetRoom(map);
+                            if (adjRoom != null && adjRoom.TouchesMapEdge)
+                                hasExteriorExit = true;
+                            else
+                                hasInteriorSide = true;
+                        }
+                    }
+
+                    // If the door has an interior side but no exterior exit, the room is sealed
+                    if (hasInteriorSide && !hasExteriorExit)
+                    {
+                        int rx = thing.Position.x - pawn.Position.x;
+                        int rz = thing.Position.z - pawn.Position.z;
+                        issues.Add("Door at (" + rx + "," + rz + ") has no outside exit — the room is sealed and inaccessible. Deconstruct a wall adjacent to the door to create an opening.");
+                    }
+                }
+            }
+
             var constructionDef = DefDatabase<WorkTypeDef>.GetNamed("Construction", false);
             if (constructionDef != null && pawn.WorkTypeIsDisabled(constructionDef))
                 issues.Add("You are incapable of construction — other colonists must build your blueprints.");
