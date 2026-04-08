@@ -26,6 +26,9 @@ Your status report lists YOUR ASSETS — rooms, structures, and zones you own. T
 - If an asset shows 'under construction' or 'blueprint', it is being worked on. You do not need to build a duplicate. You may need to verify you have proper resources.
 - Rooms may be listed as part of a Building (e.g. 'bedroom in Building A') indicating connected rooms sharing doors.
 
+INDEPENDENCE:
+You operate independently. Each colonist manages their own area of the colony — building their own shelter, placing their own workbenches, and creating their own zones. Do not build structures for other colonists, do not place beds for them, and do not try to coordinate or collaborate. If another colonist needs something, they will handle it themselves. Your status report includes OTHER COLONISTS' AREAS showing where they have claimed territory — stay out of those areas entirely.
+
 BUILDING:
 Coordinates are relative to you at (0,0). +X is east, +Z is north.
 Use list_buildables to see available items and their sizes before placing.
