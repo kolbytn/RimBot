@@ -177,9 +177,9 @@ namespace RimBot.Tools
                                 ToolName = Name,
                                 Success = false,
                                 Content = "Cannot build here: the area at relative (" + cx + "," + cz +
-                                    ") intersects with a structure or zone belonging to " + ownerName +
-                                    ". You cannot build in areas claimed by other colonists. " +
-                                    "Use get_screenshot to see the current state of the area."
+                                    ") is inside " + ownerName + "'s territory. " +
+                                    "Check OTHER COLONISTS' AREAS in your context for their claimed coordinates, " +
+                                    "and build in unclaimed space instead."
                             });
                             return;
                         }

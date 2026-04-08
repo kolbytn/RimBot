@@ -518,6 +518,22 @@ namespace RimBot
                 }
             }
 
+            // --- Other bots' assets (avoid building in these areas) ---
+            if (tracker != null)
+            {
+                var otherAssets = tracker.GetOtherBotsAssetsSummary(pawn.thingIDNumber);
+                if (otherAssets.Count > 0)
+                {
+                    sb.AppendLine("OTHER COLONISTS' AREAS (do NOT build here):");
+                    foreach (var item in otherAssets)
+                    {
+                        sb.AppendLine("  " + item.OwnerName + ": " + item.AssetName +
+                            " (" + item.MinX + "," + item.MinZ + ")-(" + item.MaxX + "," + item.MaxZ + ")");
+                    }
+                    sb.AppendLine("");
+                }
+            }
+
             // --- Issues ---
             var issues = new List<string>();
             foreach (var thing in map.listerThings.AllThings)

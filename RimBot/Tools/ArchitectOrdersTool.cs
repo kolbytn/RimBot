@@ -276,7 +276,9 @@ namespace RimBot.Tools
                         int owner = tracker.GetThingOwner(thing.thingIDNumber);
                         if (owner >= 0 && owner != currentPawnId)
                         {
-                            skipReason = "owned by another colonist";
+                            var ownerPawn = BrainManager.FindPawnById(owner);
+                            string ownerName = ownerPawn != null ? ownerPawn.LabelShort : "another colonist";
+                            skipReason = "owned by " + ownerName + " — do not build in their area";
                             return false;
                         }
                     }

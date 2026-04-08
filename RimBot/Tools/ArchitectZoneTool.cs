@@ -115,9 +115,9 @@ namespace RimBot.Tools
                                 ToolName = Name,
                                 Success = false,
                                 Content = "Cannot create/expand zone: cell at relative (" + relX + "," + relZ +
-                                    ") intersects with a structure or zone belonging to " + ownerName +
-                                    ". You cannot place zones in areas claimed by other colonists. " +
-                                    "Use get_screenshot to see the current state of the area."
+                                    ") is inside " + ownerName + "'s territory. " +
+                                    "Check OTHER COLONISTS' AREAS in your context for their claimed coordinates, " +
+                                    "and place zones in unclaimed space instead."
                             });
                             return;
                         }
@@ -356,7 +356,7 @@ namespace RimBot.Tools
             var result = "Deleted " + deletedZones.Count + " zone(s) covering " + cellsAffected + " cells. " +
                 noZone + " cells had no zone.";
             if (blockedByOwner > 0)
-                result += " " + blockedByOwner + " zone(s) skipped (owned by another colonist).";
+                result += " " + blockedByOwner + " zone(s) skipped (owned by another colonist — do not modify their zones).";
             return result;
         }
 

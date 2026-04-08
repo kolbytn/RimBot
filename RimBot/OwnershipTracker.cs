@@ -754,6 +754,32 @@ namespace RimBot
             return new int[] { minX, minZ, maxX, maxZ };
         }
 
+        /// <summary>
+        /// Returns a condensed summary of all other bots' assets for context injection.
+        /// Each entry: asset name, owner name, bounding rectangle.
+        /// </summary>
+        public List<(string OwnerName, string AssetName, int MinX, int MinZ, int MaxX, int MaxZ)> GetOtherBotsAssetsSummary(int pawnId)
+        {
+            var result = new List<(string, string, int, int, int, int)>();
+
+            foreach (var otherPawnId in BrainManager.ActivePawnIds)
+            {
+                if (otherPawnId == pawnId) continue;
+
+                var otherPawn = BrainManager.FindPawnById(otherPawnId);
+                if (otherPawn == null) continue;
+                string ownerName = otherPawn.LabelShort;
+
+                var assets = GetOwnedAssets(otherPawnId);
+                foreach (var asset in assets)
+                {
+                    result.Add((ownerName, asset.Name, asset.MinX, asset.MinZ, asset.MaxX, asset.MaxZ));
+                }
+            }
+
+            return result;
+        }
+
         // --- Helpers ---
 
         private static int GetDesignationKey(Designation d)

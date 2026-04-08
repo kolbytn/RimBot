@@ -55,7 +55,7 @@ These issues require more than quick fixes — they need architectural or strate
 
 ## Multi-Bot Issues
 
-- [ ] **Bots attempt to build in each other's areas** — Ownership enforcement correctly blocks the placement, but bots repeatedly retry at different coordinates still within the other bot's territory. Need: improve ownership prompts in BuildContext and tool error responses so bots learn to avoid red areas more effectively.
+- [x] **Bots attempt to build in each other's areas** — Fixed: BuildContext now shows "OTHER COLONISTS' AREAS" section listing each other bot's assets with name and bounding coordinates. Error messages on ownership violations reference this section and name the conflicting owner. Verified: Eadan hit Skater's stockpile once, then successfully placed elsewhere on next attempt with no further retries.
 - [ ] **System prompt should emphasize independent operation** — Bots currently place multiple beds and don't clearly understand they're working independently. The system prompt should explicitly state that each bot manages its own colony area, builds its own shelter, and should not try to build for other colonists.
 - [ ] **Thread safety: Collection modified during enumeration** — `System.InvalidOperationException` observed during multi-bot runs. Likely caused by concurrent access to ownership tracker or thing lister from multiple brain threads. Need: add synchronization to shared data structures accessed from background threads.
 - [ ] **Formal resource sharing between bots** — Currently bots cannot share stockpiles or resources by design. Need a future mechanism for bots to exchange items, share zones, or coordinate building projects.

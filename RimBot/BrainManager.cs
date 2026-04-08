@@ -21,6 +21,8 @@ namespace RimBot
             return brain;
         }
 
+        public static IEnumerable<int> ActivePawnIds => brains.Keys;
+
         public static Pawn FindPawnById(int pawnId)
         {
             var colonists = Find.CurrentMap.mapPawns.FreeColonistsSpawned;
