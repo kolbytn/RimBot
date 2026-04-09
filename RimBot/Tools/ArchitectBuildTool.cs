@@ -233,9 +233,25 @@ namespace RimBot.Tools
                     continue;
                 }
 
-                var blueprint = GenConstruct.PlaceBlueprintForBuild(buildDef, cell, map, rotation, Faction.OfPlayer, stuffDef);
-                if (blueprint != null)
-                    OwnershipTracker.Get(map)?.SetThingOwner(blueprint.thingIDNumber, context.PawnId);
+                // Zero-cost items (e.g. SleepingSpot) should be placed directly —
+                // they have no construction phase and will botch endlessly as frames.
+                bool zeroCost = thingDef != null && !thingDef.MadeFromStuff &&
+                    (thingDef.costList == null || thingDef.costList.Count == 0) &&
+                    thingDef.costStuffCount == 0;
+
+                if (zeroCost && thingDef != null)
+                {
+                    var thing = ThingMaker.MakeThing(thingDef, null);
+                    thing.SetFactionDirect(Faction.OfPlayer);
+                    GenSpawn.Spawn(thing, cell, map, rotation);
+                    OwnershipTracker.Get(map)?.SetThingOwner(thing.thingIDNumber, context.PawnId);
+                }
+                else
+                {
+                    var blueprint = GenConstruct.PlaceBlueprintForBuild(buildDef, cell, map, rotation, Faction.OfPlayer, stuffDef);
+                    if (blueprint != null)
+                        OwnershipTracker.Get(map)?.SetThingOwner(blueprint.thingIDNumber, context.PawnId);
+                }
                 placed++;
             }
 
