@@ -104,6 +104,7 @@
     <Compile Include="ConversationSummarizer.cs" />
     <Compile Include="MetricsTracker.cs" />
     <Compile Include="SpatialEvaluator.cs" />
+    <Compile Include="SurvivalNeeds.cs" />
     <Compile Include="Tools\ToolTypes.cs" />
     <Compile Include="Tools\GetScreenshotTool.cs" />
     <Compile Include="Tools\ArchitectBuildTool.cs" />

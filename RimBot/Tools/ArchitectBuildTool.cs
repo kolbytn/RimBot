@@ -228,6 +228,22 @@ namespace RimBot.Tools
                 if (!report.Accepted)
                 {
                     string reason = report.Reason ?? "blocked";
+                    // Enhance interaction spot messages with direction info
+                    if (thingDef != null && thingDef.hasInteractionCell && reason.Contains("nteraction"))
+                    {
+                        try
+                        {
+                            var interCell = ThingUtility.InteractionCellWhenAt(thingDef, cell, rotation, map);
+                            var dir = interCell - cell;
+                            string dirName = "unknown";
+                            if (dir.z > 0) dirName = "north (+Z)";
+                            else if (dir.z < 0) dirName = "south (-Z)";
+                            else if (dir.x > 0) dirName = "east (+X)";
+                            else if (dir.x < 0) dirName = "west (-X)";
+                            reason += ". Needs clear tile to the " + dirName + ". Try a different rotation or a larger room";
+                        }
+                        catch { }
+                    }
                     AddSkipReason(skipReasons, reason);
                     skipped++;
                     continue;

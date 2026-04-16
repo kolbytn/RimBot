@@ -54,7 +54,8 @@ namespace RimBot
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 using (var stream = assembly.GetManifestResourceStream("RimBot.SystemPrompt.txt"))
                 using (var reader = new System.IO.StreamReader(stream))
-                    cachedSystemPrompt = reader.ReadToEnd().Trim();
+                    cachedSystemPrompt = reader.ReadToEnd().Trim()
+                        + "\n\n" + SurvivalNeeds.GetSystemPromptSection();
             }
             catch (Exception ex)
             {
@@ -439,57 +440,7 @@ namespace RimBot
             }
 
             // === PRIORITY SECTION (most important, top of context) ===
-
-            // --- Survival status ---
-            int meals = map.resourceCounter.GetCount(ThingDefOf.MealSimple)
-                      + map.resourceCounter.GetCount(ThingDefOf.MealFine);
-            int survivalMeals = 0;
-            var survivalMealDef = DefDatabase<ThingDef>.GetNamed("MealSurvivalPack", false);
-            if (survivalMealDef != null)
-            {
-                foreach (var t in map.listerThings.ThingsOfDef(survivalMealDef))
-                    survivalMeals += t.stackCount;
-            }
-            bool hasStove = HasBuilding(map, "FueledStove") || HasBuilding(map, "ElectricStove");
-            bool hasButcher = HasBuilding(map, "TableButcher");
-            bool hasGrowingZone = false;
-            bool hasStockpile = false;
-            foreach (var zone in map.zoneManager.AllZones)
-            {
-                if (zone is Zone_Growing) hasGrowingZone = true;
-                if (zone is Zone_Stockpile) hasStockpile = true;
-            }
-            bool hasBed = HasBuilding(map, "Bed") || HasBuilding(map, "DoubleBed") || HasBuilding(map, "RoyalBed");
-            bool hasBedBP = HasBlueprintOrFrame(map, "Bed") || HasBlueprintOrFrame(map, "DoubleBed");
-            bool hasEnclosedRoom = false;
-            foreach (var building in map.listerBuildings.allBuildingsColonist)
-            {
-                if (building == null || !building.Spawned) continue;
-                var room = building.GetRoom();
-                if (room != null && !room.TouchesMapEdge && !room.IsDoorway)
-                { hasEnclosedRoom = true; break; }
-            }
-
-            string survivalPriority = null;
-            if (!hasStockpile)
-                survivalPriority = "No stockpile zone. Items cannot be hauled or organized.";
-            else if (meals == 0 && survivalMeals == 0)
-                survivalPriority = "No food. No meals available anywhere on the map.";
-            else if (meals == 0 && survivalMeals > 0)
-                survivalPriority = "No meals in stockpile. " + survivalMeals + " packaged survival meals on the ground need hauling.";
-            else if (!hasEnclosedRoom)
-                survivalPriority = "No enclosed shelter. Need a room (walls + door) with a bed.";
-            else if (!hasBed && !hasBedBP)
-                survivalPriority = "No bed. Need a bed inside the enclosed room.";
-            else if (!hasStove && !HasBlueprintOrFrame(map, "FueledStove") && !HasBlueprintOrFrame(map, "ElectricStove"))
-                survivalPriority = "No long-term food production. Need a cook stove and butcher table.";
-            else if (!hasGrowingZone)
-                survivalPriority = "No growing zone for farming.";
-
-            if (survivalPriority != null)
-                sb.AppendLine("SURVIVAL PRIORITY: " + survivalPriority);
-            else
-                sb.AppendLine("Survival needs are met.");
+            sb.AppendLine(SurvivalNeeds.GetContextSection(map, pawn.thingIDNumber));
 
             // --- Your owned assets ---
             var tracker = OwnershipTracker.Get(map);
@@ -857,26 +808,6 @@ namespace RimBot
                 parts.Add(count + " " + label);
         }
 
-        private static bool HasBuilding(Map map, string defName)
-        {
-            var def = DefDatabase<ThingDef>.GetNamed(defName, false);
-            if (def == null) return false;
-            return map.listerBuildings.ColonistsHaveBuilding(def);
-        }
-
-        private static bool HasBlueprintOrFrame(Map map, string defName)
-        {
-            foreach (var thing in map.listerThings.AllThings)
-            {
-                if (thing.Faction != Faction.OfPlayer) continue;
-                BuildableDef target = null;
-                if (thing is Blueprint bp) target = bp.def.entityDefToBuild;
-                else if (thing is Frame fr) target = fr.def.entityDefToBuild;
-                if (target != null && target.defName == defName)
-                    return true;
-            }
-            return false;
-        }
 
 
         private void RecordSingleTurn(AgentTurn turn, int iterIndex, string systemPrompt)
