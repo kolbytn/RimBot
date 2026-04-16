@@ -173,6 +173,8 @@ namespace RimBot
                         Log.Message("[RimBot] Spawned config colonist " + pawn.LabelShort);
                     }
                 }
+
+                DistributeStartingItems(map, comp.configPawnIds);
             }
 
             // Skip if profile count hasn't changed and we already have the right number
@@ -350,6 +352,51 @@ namespace RimBot
                 if (!OwnershipTracker.IsHighlighted(pawnId))
                     OwnershipTracker.ToggleHighlight(pawnId);
             }
+        }
+
+        /// <summary>
+        /// Distributes starting items (initially forbidden equipment) evenly between config pawns
+        /// so each bot has their own share of starting resources.
+        /// </summary>
+        private static void DistributeStartingItems(Map map, List<int> pawnIds)
+        {
+            if (pawnIds.Count < 2) return;
+
+            var startingIds = TickManagerPatch.StartingItemIds;
+            if (startingIds == null || startingIds.Count == 0) return;
+
+            var tracker = OwnershipTracker.Get(map);
+            if (tracker == null) return;
+
+            // Group starting items by defName for fair distribution
+            var itemsByDef = new Dictionary<string, List<Thing>>();
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (!startingIds.Contains(thing.thingIDNumber)) continue;
+
+                List<Thing> list;
+                if (!itemsByDef.TryGetValue(thing.def.defName, out list))
+                {
+                    list = new List<Thing>();
+                    itemsByDef[thing.def.defName] = list;
+                }
+                list.Add(thing);
+            }
+
+            // Alternate assignment between pawns for each item type
+            int totalAssigned = 0;
+            foreach (var kvp in itemsByDef)
+            {
+                var items = kvp.Value;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    int ownerIdx = i % pawnIds.Count;
+                    tracker.SetThingOwner(items[i].thingIDNumber, pawnIds[ownerIdx]);
+                    totalAssigned++;
+                }
+            }
+
+            Log.Message("[RimBot] Distributed " + totalAssigned + " starting items among " + pawnIds.Count + " colonists.");
         }
 
     }

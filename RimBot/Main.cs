@@ -105,15 +105,21 @@ namespace RimBot
             BrainManager.Tick();
         }
 
+        /// <summary>Thing IDs that were forbidden at map load (starting equipment).</summary>
+        public static HashSet<int> StartingItemIds { get; private set; }
+
         private static void UnforbidAll(Map map)
         {
             int count = 0;
+            StartingItemIds = new HashSet<int>();
             foreach (var thing in map.listerThings.AllThings)
             {
                 var comp = thing.TryGetComp<CompForbiddable>();
                 if (comp != null && comp.Forbidden)
                 {
                     comp.Forbidden = false;
+                    if (thing.def.category == ThingCategory.Item)
+                        StartingItemIds.Add(thing.thingIDNumber);
                     count++;
                 }
             }

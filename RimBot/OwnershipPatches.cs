@@ -494,6 +494,18 @@ namespace RimBot
             if (__result == null) return;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
 
+            // Don't pick up items owned by another bot
+            var tracker = OwnershipTracker.Get(pawn.Map);
+            if (tracker != null)
+            {
+                int itemOwner = tracker.GetThingOwner(t.thingIDNumber);
+                if (itemOwner >= 0 && itemOwner != pawn.thingIDNumber)
+                {
+                    __result = null;
+                    return;
+                }
+            }
+
             // Don't pick up items from another bot's zone
             if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, t.Position))
             {
