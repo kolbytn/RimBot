@@ -558,19 +558,30 @@ namespace RimBot
         }
     }
 
-    // Prevent bots from hauling to other bots' stockpile zones (destination check only;
-    // pickup filtering is handled by OwnershipForbidPatch via IsForbidden)
-    [HarmonyPatch(typeof(WorkGiver_HaulGeneral), "JobOnThing")]
-    public static class FilterHaulGeneralPatch
+    // Prevent bots from hauling items to other bots' stockpile zones.
+    // This is the single chokepoint for ALL haul destination selection — every WorkGiver
+    // that generates haul jobs calls TryFindBestBetterStoreCellFor to pick the destination.
+    [HarmonyPatch(typeof(StoreUtility), nameof(StoreUtility.TryFindBestBetterStoreCellFor))]
+    public static class FilterHaulDestinationPatch
     {
-        public static void Postfix(Pawn pawn, Thing t, ref Job __result)
+        public static void Postfix(Thing t, Pawn carrier, ref bool __result, ref IntVec3 foundCell)
         {
-            if (__result == null) return;
-            if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
+            if (!__result) return;
+            if (carrier == null || carrier.Map == null) return;
+            if (BrainManager.GetBrain(carrier.thingIDNumber) == null) return;
 
-            // Don't haul to another bot's zone
-            if (__result.targetB.IsValid && !OwnershipFilterHelper.AllowJobOnZoneCell(pawn, __result.targetB.Cell))
-                __result = null;
+            var zone = carrier.Map.zoneManager.ZoneAt(foundCell);
+            if (zone == null) return;
+
+            var tracker = OwnershipTracker.Get(carrier.Map);
+            if (tracker == null) return;
+
+            int zoneOwner = tracker.GetZoneOwner(zone.ID);
+            if (zoneOwner >= 0 && zoneOwner != carrier.thingIDNumber)
+            {
+                __result = false;
+                foundCell = IntVec3.Invalid;
+            }
         }
     }
 
