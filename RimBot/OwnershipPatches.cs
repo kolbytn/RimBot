@@ -485,7 +485,81 @@ namespace RimBot
         }
     }
 
-    // Prevent bots from hauling to/from other bots' stockpile zones
+    // --- Item pickup logging: detect what bots pick up and from where ---
+
+    [HarmonyPatch(typeof(Pawn_CarryTracker), nameof(Pawn_CarryTracker.TryStartCarry), new Type[] { typeof(Thing), typeof(int), typeof(bool) })]
+    public static class ItemPickupLogPatch
+    {
+        public static void Postfix(Pawn_CarryTracker __instance, Thing item, int count, int __result)
+        {
+            if (__result <= 0) return;
+            var pawn = __instance.pawn;
+            if (pawn == null || pawn.Map == null) return;
+            if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
+
+            var zone = pawn.Map.zoneManager.ZoneAt(item.Position);
+            string zoneName = zone != null ? zone.label : "no zone";
+            var tracker = OwnershipTracker.Get(pawn.Map);
+            string ownerInfo = "";
+            if (tracker != null)
+            {
+                int itemOwner = tracker.GetThingOwner(item.thingIDNumber);
+                int zoneOwner = zone != null ? tracker.GetZoneOwner(zone.ID) : -1;
+                if (itemOwner >= 0)
+                    ownerInfo += ", itemOwner=" + (BrainManager.FindPawnById(itemOwner)?.LabelShort ?? itemOwner.ToString());
+                if (zoneOwner >= 0)
+                    ownerInfo += ", zoneOwner=" + (BrainManager.FindPawnById(zoneOwner)?.LabelShort ?? zoneOwner.ToString());
+            }
+
+            string job = pawn.CurJob != null ? pawn.CurJob.def.defName : "none";
+            Log.Message("[RimBot] [PICKUP] " + pawn.LabelShort + " picked up " + count + "x " +
+                item.LabelNoCount + " at (" + item.Position.x + "," + item.Position.z +
+                ") from [" + zoneName + "] for job=" + job + ownerInfo);
+        }
+    }
+
+    // --- Per-pawn forbidden: items in other bots' zones or owned by other bots appear forbidden ---
+
+    [HarmonyPatch(typeof(ForbidUtility), nameof(ForbidUtility.IsForbidden), new Type[] { typeof(Thing), typeof(Pawn) })]
+    public static class OwnershipForbidPatch
+    {
+        public static void Postfix(Thing t, Pawn pawn, ref bool __result)
+        {
+            // Already forbidden by vanilla — nothing to add
+            if (__result) return;
+            // Only apply to bots
+            if (pawn == null || t == null || pawn.Map == null) return;
+            if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
+
+            // Check thing-level ownership (e.g. distributed starting items)
+            var tracker = OwnershipTracker.Get(pawn.Map);
+            if (tracker != null)
+            {
+                int itemOwner = tracker.GetThingOwner(t.thingIDNumber);
+                if (itemOwner >= 0 && itemOwner != pawn.thingIDNumber)
+                {
+                    __result = true;
+                    return;
+                }
+            }
+
+            // Check zone-level ownership (item sitting in another bot's stockpile)
+            // Guard: position may be out of bounds if the thing is being carried/destroyed
+            if (!t.Position.InBounds(pawn.Map)) return;
+            var zone = pawn.Map.zoneManager.ZoneAt(t.Position);
+            if (zone != null && tracker != null)
+            {
+                int zoneOwner = tracker.GetZoneOwner(zone.ID);
+                if (zoneOwner >= 0 && zoneOwner != pawn.thingIDNumber)
+                {
+                    __result = true;
+                }
+            }
+        }
+    }
+
+    // Prevent bots from hauling to other bots' stockpile zones (destination check only;
+    // pickup filtering is handled by OwnershipForbidPatch via IsForbidden)
     [HarmonyPatch(typeof(WorkGiver_HaulGeneral), "JobOnThing")]
     public static class FilterHaulGeneralPatch
     {
@@ -494,41 +568,8 @@ namespace RimBot
             if (__result == null) return;
             if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
 
-            // Don't pick up items owned by another bot
-            var tracker = OwnershipTracker.Get(pawn.Map);
-            if (tracker != null)
-            {
-                int itemOwner = tracker.GetThingOwner(t.thingIDNumber);
-                if (itemOwner >= 0 && itemOwner != pawn.thingIDNumber)
-                {
-                    __result = null;
-                    return;
-                }
-            }
-
-            // Don't pick up items from another bot's zone
-            if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, t.Position))
-            {
-                __result = null;
-                return;
-            }
-
             // Don't haul to another bot's zone
             if (__result.targetB.IsValid && !OwnershipFilterHelper.AllowJobOnZoneCell(pawn, __result.targetB.Cell))
-                __result = null;
-        }
-    }
-
-    // Prevent bots from merging stacks in other bots' stockpile zones
-    [HarmonyPatch(typeof(WorkGiver_Merge), "JobOnThing")]
-    public static class FilterMergePatch
-    {
-        public static void Postfix(Pawn pawn, Thing t, ref Job __result)
-        {
-            if (__result == null) return;
-            if (BrainManager.GetBrain(pawn.thingIDNumber) == null) return;
-
-            if (!OwnershipFilterHelper.AllowJobOnZoneCell(pawn, t.Position))
                 __result = null;
         }
     }
