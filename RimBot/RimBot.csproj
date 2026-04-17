@@ -98,7 +98,9 @@
     <Compile Include="Brain.cs" />
     <Compile Include="BrainManager.cs" />
     <Compile Include="OwnershipTracker.cs" />
-    <Compile Include="OwnershipPatches.cs" />
+    <Compile Include="Patches\CorePatches.cs" />
+    <Compile Include="Patches\DifficultyPatches.cs" />
+    <Compile Include="Patches\OwnershipPatches.cs" />
     <Compile Include="ScreenshotCapture.cs" />
     <Compile Include="AgentRunner.cs" />
     <Compile Include="ConversationSummarizer.cs" />

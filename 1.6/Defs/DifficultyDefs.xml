@@ -27,7 +27,7 @@
     <predatorsHuntHumanlikes>false</predatorsHuntHumanlikes>
     <allowExtremeWeatherIncidents>false</allowExtremeWeatherIncidents>
     <colonistMoodOffset>15</colonistMoodOffset>
-    <cropYieldFactor>1.5</cropYieldFactor>
+    <cropYieldFactor>1</cropYieldFactor>
     <mineYieldFactor>1.5</mineYieldFactor>
     <researchSpeedFactor>1.5</researchSpeedFactor>
     <diseaseIntervalFactor>5</diseaseIntervalFactor>
