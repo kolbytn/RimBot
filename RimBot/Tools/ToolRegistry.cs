@@ -41,6 +41,7 @@ namespace RimBot.Tools
             Register(new SetWildlifeOperationTool());
             Register(new ListResearchTool());
             Register(new SetResearchTool());
+            Register(new SetGoalTool());
         }
 
         private static void Register(ITool tool)

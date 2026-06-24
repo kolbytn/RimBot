@@ -37,6 +37,7 @@ namespace RimBot
         public float LastRunStartedAt => lastRunStartedAt;
         public bool IsPaused => Time.realtimeSinceStartup < pauseUntil;
         private const float ErrorPauseSeconds = 30f;
+        public string Goal { get; set; }
         public IReadOnlyList<HistoryEntry> History => history;
 
         // Screenshots saved alongside Player.log for spatial debugging
@@ -190,9 +191,11 @@ namespace RimBot
 
                 var sysPrompt = LoadSystemPrompt();
 
-                userParts.Add(ContentPart.FromText(
-                    "Screenshot attached — you are at center (0,0). " +
-                    "You are currently " + currentActivity + ".\n\n" + context));
+                string userText = "Screenshot attached — you are at center (0,0). " +
+                    "You are currently " + currentActivity + ".\n\n" + context;
+                if (!string.IsNullOrEmpty(Goal))
+                    userText += "\n\nYOUR CURRENT GOAL: " + Goal;
+                userParts.Add(ContentPart.FromText(userText));
 
                 agentConversation = new List<ChatMessage>
                 {
@@ -224,9 +227,11 @@ namespace RimBot
                 // Record this cycle's start index
                 cycleStartIndices.Add(agentConversation.Count);
 
-                userParts.Add(ContentPart.FromText(
-                    elapsedSeconds + "s elapsed. Screenshot attached. " +
-                    "You are currently " + currentActivity + ".\n\n" + context));
+                string contText = elapsedSeconds + "s elapsed. Screenshot attached. " +
+                    "You are currently " + currentActivity + ".\n\n" + context;
+                if (!string.IsNullOrEmpty(Goal))
+                    contText += "\n\nYOUR CURRENT GOAL: " + Goal;
+                userParts.Add(ContentPart.FromText(contText));
 
                 agentConversation.Add(new ChatMessage("user", userParts));
             }

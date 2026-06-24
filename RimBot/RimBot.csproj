@@ -130,6 +130,7 @@
     <Compile Include="Tools\SetWildlifeOperationTool.cs" />
     <Compile Include="Tools\ListResearchTool.cs" />
     <Compile Include="Tools\SetResearchTool.cs" />
+    <Compile Include="Tools\SetGoalTool.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
